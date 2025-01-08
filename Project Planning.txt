@@ -4,15 +4,20 @@ Project Setup and Planning Document
 1. Project Overview:
 - Project Name: [Insert Name]
 - End Goal:
-  - A clear, functional, and deployable product that meets the primary needs of [target audience].
-  - Detailed specifications for the final product (e.g., website, app, software tool).
+  -Develop an app/device to engage dementia patients with features like prerecorded messages from loved ones, evolving to AI-driven voice bots for conversation and companionship. 
+  This reduces loneliness and supports care staff by automating some interactions.
+  - Assess patient mood via tone or patterns and extract key needs/preferences for tailored care.
+  Our ultimate goal is to revolutionize modern caregiving by providing an innovative companion app designed to enhance care services, foster connection, and streamline operations 
+  in care facilities.
 
 2. Project Scope:
-- Define the target audience and the problem this project will solve.
+- The target audience includes dementia patients, their caregivers, and care facility staff. The primary problem addressed is the lack of consistent emotional support and
+ personalized interaction for dementia patients, leading to loneliness and further physical and mental decline as studies show (https://pmc.ncbi.nlm.nih.gov/articles/PMC3874845/)
+ For caregivers and staff, the app aims to alleviate the workload by automating routine interactions and providing actionable insights into patient mood and needs.
 - Key features of the final product:
-  1. [Feature 1]
-  2. [Feature 2]
-  3. [Feature 3]
+  1. Personalized prerecorded messages from loved ones to offer comfort and familiarity.
+  2. AI-driven voice bot made from the (audio of loved ones ) capable of holding meaningful conversations to reduce loneliness.
+  3. Real-time mood assessment and needs analysis using tone recognition to provide actionable insights for caregivers.
 
 3. Technology Stack:
 - Frontend: [React/Next.js, Angular, etc.]
@@ -23,9 +28,9 @@ Project Setup and Planning Document
 
 4. MVP Definition:
 - Core features required to validate the idea:
-  1. [Core Feature 1]
-  2. [Core Feature 2]
-  3. [Core Feature 3]
+  1. A call to the patients number with a simple playback of prerecorded messages from loved ones to create familiarity and comfort.
+  2. Basic AI-driven responses using a limited set of prerecorded phrases to simulate conversation.
+  3. Real-time voice tone analysis to determine mood and send simple notifications to caregivers.
 - Exclude non-essential features for faster delivery and testing.
 
 5. Milestones:
