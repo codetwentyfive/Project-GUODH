@@ -34,10 +34,30 @@ Project Setup and Planning Document
 - Exclude non-essential features for faster delivery and testing.
 
 5. Milestones:
-- Milestone 1: Research and planning (1-2 weeks)
-- Milestone 2: MVP development (4-6 weeks)
-- Milestone 3: Testing and iteration (2 weeks)
-- Milestone 4: Full product development and deployment (8-12 weeks)
+Phase 1: MVP Setup (2-3 weeks)
+• Basic authentication
+• Patient profile management 
+• Simple voice message recording/playback
+• Basic dashboard for care staff
+
+Phase 2: Core Features (4-5 weeks)
+• Voice message system integration with Twilio
+• Basic AI conversation capabilities
+• Simple mood analysis
+• Caregiver notification system
+
+Phase 3: Advanced Features (6-8 weeks)
+• Advanced AI conversation with personality matching
+• Comprehensive mood analysis and reporting
+• Care insights dashboard
+• Family portal for message management
+
+Key Technical Considerations:
+• Implement WebRTC for voice recording
+• Use Server-Sent Events for real-time notifications
+• Implement proper error handling and logging
+• Ensure HIPAA compliance for patient data
+• Add comprehensive testing (Jest + Playwright)
 
 6. Estimated Workload:
 - Identify key tasks for each milestone.
