@@ -1,0 +1,62 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String    @id @default(uuid())
+  email     String    @unique
+  password  String
+  name      String
+  phone     String
+  patients  Patient[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Patient {
+  id           String    @id @default(uuid())
+  name         String
+  phoneNumber  String
+  recordCalls  Boolean   @default(false)
+  caretakerId  String
+  caretaker    User      @relation(fields: [caretakerId], references: [id])
+  keywords     Keyword[]
+  callLogs     CallLog[]
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+}
+
+model Keyword {
+  id        String   @id @default(uuid())
+  word      String
+  patientId String
+  patient   Patient  @relation(fields: [patientId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model CallLog {
+  id             String   @id @default(uuid())
+  patientId      String
+  patient        Patient  @relation(fields: [patientId], references: [id])
+  startTime      DateTime @default(now())
+  endTime        DateTime?
+  duration       Int?
+  transcription  String?
+  recordingUrl   String?
+  detectedKeywords String[]
+  notificationSent Boolean @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
