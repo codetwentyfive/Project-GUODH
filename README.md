@@ -1,41 +1,141 @@
-# Project-GUODH
-HELP THEM OLD PEOPLE NOT BE LONELY AND MAKE THAT MULA ,NO ONE THINKS ABOUT THE OLD PEOPLE ,ITS ALWAYS THE CHILDREN!
+# CareCall - Real-time Audio Communication Platform
 
-# Basic Terminology
-What is SIP? 
-Session Initiation Protocol (SIP) is a signaling protocol that manages and establishes communication sessions between IP devices. SIP is used for a variety of applications, including: Voice calls, Video conferences, Instant messaging, and Mobile phone calling over LTE (VoLTE). 
+A WebRTC-based platform enabling real-time audio communication between caretakers and patients. Built with Next.js, TypeScript, and Socket.IO.
 
-# Getting Started
+## Project Structure
 
-Video Series on asterisk basics:
-https://www.youtube.com/watch?v=dyfaFu2yn78
+```
+Project-GUODH/
+├── backend/             # Node.js + Express + Socket.IO server
+├── caretaker-frontend/  # Next.js frontend for caretakers
+└── patient-frontend/    # Next.js frontend for patients
+```
 
-Where to download: 
-https://www.asterisk.org/downloads/asterisk/all-asterisk-versions/
-Currently we will be targeting the LTS 20.X version
+## Features
 
-After downloading (If on linux) use `tar zxvf <package name>.tar.gz` to unpack package. 
+- **Real-time Audio Calls**: WebRTC-powered audio communication
+- **Role-based Interfaces**: Separate UIs for caretakers and patients
+- **Modern UI**: Built with Shadcn UI components
+- **Signaling Server**: Socket.IO-based server for WebRTC signaling
+- **Connection Management**: Robust handling of WebRTC connections and ICE candidates
 
-Once you have unpacked project cd into project and run `./configure` (Make sure to have installed above dependencies before this point)
+## Technical Stack
 
-## Initial Install:
-All of these steps except the first assume you are in the base directory of the project.
+- **Frontend**:
+  - Next.js 15.1.6
+  - TypeScript
+  - Tailwind CSS
+  - Shadcn UI Components
+  - Socket.IO Client
+  - WebRTC API
 
-1. To install dependencies: `sudo apt install libedit-dev uuid-dev libjansson-dev libxml2-dev sqlite3 libsqlite3-dev`
-2. `make` will compile the project 
-    2a. `make menuconfig` Will configure which packages you want to add(Not necessary yet, we are happy with default for now)
-3. `make install` will install the project to use
-4. Configuration files are stored in /etc/asterisk. To get config files created for you to start use `make samples` this will give you some files to play with/so that things work.
-5. `sudo asterisk -cvvv` will start asterisk in (c)onsole mode and 3 levels of (v)erbose
-6. To create your start script:
-    6a. `cd contrib/init.d/`
-    6b. `cp rc.debian.asterisk /etc/init.d/asterisk` use appropriate architecture in aboves folder if not running debian linux
-    To start project: (Won't work till we have other configuration)
-    6c. `type asterisk` copy the location this command gives you
-    6d. `cd` to get you to root then open file e.g. `sudo vi /etc/init.d/asterisk` (These steps might be easier to follow with (video)[https://www.youtube.com/watch?v=F7eUh3vII7U])
-        VIM notes: Use the 'x' key to delete character under cursor. Click 'i' to begin inserting. 'Esc' to stop inserting. Use `:qa!` to cancel without saving and `:!wq` to cancel and save
-        6d1. Scroll down to DAEMON replace "__ASTERISK_SBIN_DIR__/asterisk" with the output from `type asterisk` above.
-        6d2. For ASTVARRUNDIR write "/var/run/asterisk" (Without quotation marks) after the "="
-        6d3. For ASTETCDIR write "/etc/asterisk"
+- **Backend**:
+  - Node.js
+  - Express
+  - Socket.IO
+  - TypeScript
 
-7. From root (Do `cd` if not there) `sudo /etc/init.d/asterisk start` to start the asterisk service in the background. You can now connect to your instance running in the background using `sudo asterisk -r`. Use `exit` to exit instance.
+## Getting Started
+
+1. Start the backend server:
+```bash
+cd backend
+npm install
+npm run dev
+```
+
+2. Start the patient frontend:
+```bash
+cd patient-frontend
+npm install
+npm run dev
+```
+
+3. Start the caretaker frontend:
+```bash
+cd caretaker-frontend
+npm install
+npm run dev
+```
+
+## Access Points
+
+- Backend: http://localhost:3000
+- Patient Interface: http://localhost:3001
+- Caretaker Interface: http://localhost:3002
+
+## Current Implementation
+
+### Backend
+- Socket.IO server handling WebRTC signaling
+- User registration and management
+- Event handling for call offers, answers, ICE candidates, and call termination
+
+### Caretaker Frontend
+- List of available patients
+- Call initiation functionality
+- Real-time audio streaming
+- Call status management
+- Connection state monitoring
+
+### Patient Frontend
+- Incoming call notifications
+- Call accept/reject functionality
+- Active call interface
+- Connection state monitoring
+
+### WebRTC Implementation
+- Audio-only calls
+- ICE candidate handling
+- Connection state management
+- Automatic cleanup on call end
+
+### Socket Events
+- `register`: User registration
+- `call-offer`: Initial call setup
+- `call-answered`: Call acceptance
+- `ice-candidate`: Network candidate exchange
+- `call-ended`: Call termination
+
+## Development Status
+
+The application currently supports:
+- Basic audio calls between caretakers and patients
+- User registration and presence
+- Call state management
+- Real-time connection status updates
+
+## Known Issues
+
+1. Socket reconnection handling needs improvement
+2. ICE candidate timing synchronization
+3. Multiple socket connections on page refresh
+
+## Next Steps
+
+1. Improve error handling and recovery
+2. Add call quality monitoring
+3. Implement user authentication
+4. Add call history tracking
+5. Enhance UI feedback during connection establishment
+
+## Testing
+
+To test the application:
+1. Open the patient interface (http://localhost:3001)
+2. Open the caretaker interface (http://localhost:3002)
+3. Initiate a call from the caretaker interface
+4. Accept the call on the patient interface
+5. Check browser console for connection logs
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## License
+
+[Add appropriate license]

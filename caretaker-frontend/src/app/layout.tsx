@@ -7,8 +7,8 @@ import { CallProvider } from "@/contexts/CallContext";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "CareCall Patient Interface",
-  description: "Patient interface for receiving care calls",
+  title: "CareCall Caretaker Dashboard",
+  description: "Dashboard for managing patient calls",
 };
 
 export default function RootLayout({
