@@ -47,16 +47,17 @@ model Keyword {
 }
 
 model CallLog {
-  id             String   @id @default(uuid())
-  patientId      String
-  patient        Patient  @relation(fields: [patientId], references: [id])
-  startTime      DateTime @default(now())
-  endTime        DateTime?
-  duration       Int?
-  transcription  String?
-  recordingUrl   String?
+  id              String    @id @default(cuid())
+  patientId       String
+  startTime       DateTime  @default(now())
+  endTime         DateTime?
+  duration        Int?
+  transcription   String?
+  recordingUrl    String?
   detectedKeywords String[]
-  notificationSent Boolean @default(false)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  notificationSent Boolean  @default(false)
+  isWebRTC        Boolean  @default(false)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  patient         Patient   @relation(fields: [patientId], references: [id])
 }

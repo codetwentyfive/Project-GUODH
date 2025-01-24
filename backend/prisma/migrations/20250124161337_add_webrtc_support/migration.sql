@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "CallLog" ADD COLUMN     "isWebRTC" BOOLEAN NOT NULL DEFAULT false;
