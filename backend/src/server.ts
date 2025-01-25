@@ -13,7 +13,12 @@ dotenv.config();
 
 const app: Express = express();
 const httpServer = createServer(app);
-const port = 3000;
+const port = process.env.PORT || 3000;
+
+// User mapping store
+const connectedUsers = new Map<string, string>(); // userId -> socketId
+const socketToUser = new Map<string, string>(); // socketId -> userId
+const activeRooms = new Map<string, Set<string>>(); // roomId -> Set of userIds
 
 // Configure CORS
 app.use(cors({
@@ -37,44 +42,192 @@ const io = new Server(httpServer, {
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
+  // Handle user registration
   socket.on('register', (userId: string) => {
-    console.log('User registered:', userId, 'with socket', socket.id);
-    socket.data.userId = userId;
+    try {
+      // Clean up any existing registrations for this user
+      const existingSocketId = connectedUsers.get(userId);
+      if (existingSocketId) {
+        const existingSocket = io.sockets.sockets.get(existingSocketId);
+        if (existingSocket) {
+          existingSocket.disconnect();
+        }
+        socketToUser.delete(existingSocketId);
+      }
+
+      // Register new socket
+      connectedUsers.set(userId, socket.id);
+      socketToUser.set(socket.id, userId);
+      socket.join(userId); // Join personal room
+
+      console.log('User registered:', userId, 'with socket', socket.id);
+      
+      // Notify user of successful registration
+      socket.emit('registration-success', { userId });
+      
+      // Broadcast user's online status
+      socket.broadcast.emit('user-online', { userId });
+    } catch (error) {
+      console.error('Registration error:', error);
+      socket.emit('registration-error', { error: 'Failed to register user' });
+    }
   });
 
+  // Handle call initiation
   socket.on('call-offer', ({ targetId, offer }) => {
-    console.log('Call offer from', socket.data.userId, 'to', targetId);
-    socket.broadcast.emit('call-offer', {
-      from: socket.data.userId,
-      offer
-    });
+    try {
+      const callerId = socketToUser.get(socket.id);
+      if (!callerId) {
+        throw new Error('Caller not registered');
+      }
+
+      const targetSocketId = connectedUsers.get(targetId);
+      if (!targetSocketId) {
+        socket.emit('call-failed', { error: 'Target user not found or offline' });
+        return;
+      }
+
+      console.log('Call offer from', callerId, 'to', targetId);
+
+      // Create or join call room
+      const roomId = `call:${callerId}:${targetId}`;
+      socket.join(roomId);
+      io.sockets.sockets.get(targetSocketId)?.join(roomId);
+
+      // Store active call participants
+      activeRooms.set(roomId, new Set([callerId, targetId]));
+
+      // Send offer to target
+      io.to(targetId).emit('call-offer', {
+        from: callerId,
+        offer,
+        roomId
+      });
+    } catch (error) {
+      console.error('Call offer error:', error);
+      socket.emit('call-failed', { error: 'Failed to initiate call' });
+    }
   });
 
-  socket.on('call-answer', ({ targetId, answer }) => {
-    console.log('Call answer from', socket.data.userId, 'to', targetId);
-    socket.broadcast.emit('call-answered', {
-      from: socket.data.userId,
-      answer
-    });
+  // Handle call answer
+  socket.on('call-answer', ({ targetId, answer, roomId }) => {
+    try {
+      const responderId = socketToUser.get(socket.id);
+      if (!responderId) {
+        throw new Error('Responder not registered');
+      }
+
+      console.log('Call answer from', responderId, 'to', targetId);
+
+      // Verify call room
+      const participants = activeRooms.get(roomId);
+      if (!participants?.has(responderId) || !participants?.has(targetId)) {
+        throw new Error('Invalid call room');
+      }
+
+      // Send answer to caller
+      io.to(targetId).emit('call-answered', {
+        from: responderId,
+        answer,
+        roomId
+      });
+    } catch (error) {
+      console.error('Call answer error:', error);
+      socket.emit('call-failed', { error: 'Failed to answer call' });
+    }
   });
 
-  socket.on('ice-candidate', ({ targetId, candidate }) => {
-    console.log('ICE candidate from', socket.data.userId, 'to', targetId);
-    socket.broadcast.emit('ice-candidate', {
-      from: socket.data.userId,
-      candidate
-    });
+  // Handle ICE candidates
+  socket.on('ice-candidate', ({ targetId, candidate, roomId }) => {
+    try {
+      const senderId = socketToUser.get(socket.id);
+      if (!senderId) {
+        throw new Error('Sender not registered');
+      }
+
+      // Verify call room
+      const participants = activeRooms.get(roomId);
+      if (!participants?.has(senderId) || !participants?.has(targetId)) {
+        throw new Error('Invalid call room');
+      }
+
+      console.log('ICE candidate from', senderId, 'to', targetId);
+
+      // Send candidate to target
+      io.to(targetId).emit('ice-candidate', {
+        from: senderId,
+        candidate,
+        roomId
+      });
+    } catch (error) {
+      console.error('ICE candidate error:', error);
+    }
   });
 
-  socket.on('end-call', ({ targetId }) => {
-    console.log('Call ended by', socket.data.userId, 'to', targetId);
-    socket.broadcast.emit('call-ended', {
-      from: socket.data.userId
-    });
+  // Handle call end
+  socket.on('end-call', ({ targetId, roomId }) => {
+    try {
+      const senderId = socketToUser.get(socket.id);
+      if (!senderId) {
+        throw new Error('Sender not registered');
+      }
+
+      console.log('Call ended by', senderId, 'to', targetId);
+
+      // Clean up call room
+      const participants = activeRooms.get(roomId);
+      if (participants) {
+        participants.forEach(participantId => {
+          const participantSocket = io.sockets.sockets.get(connectedUsers.get(participantId)!);
+          participantSocket?.leave(roomId);
+          
+          // Notify participant
+          if (participantId !== senderId) {
+            io.to(participantId).emit('call-ended', {
+              from: senderId,
+              roomId
+            });
+          }
+        });
+        activeRooms.delete(roomId);
+      }
+    } catch (error) {
+      console.error('Call end error:', error);
+    }
   });
 
+  // Handle disconnection
   socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
+    try {
+      const userId = socketToUser.get(socket.id);
+      if (userId) {
+        // Clean up user mappings
+        socketToUser.delete(socket.id);
+        connectedUsers.delete(userId);
+
+        // Clean up active calls
+        for (const [roomId, participants] of activeRooms.entries()) {
+          if (participants.has(userId)) {
+            participants.forEach(participantId => {
+              if (participantId !== userId) {
+                io.to(participantId).emit('call-ended', {
+                  from: userId,
+                  roomId,
+                  reason: 'disconnected'
+                });
+              }
+            });
+            activeRooms.delete(roomId);
+          }
+        }
+
+        // Broadcast user's offline status
+        socket.broadcast.emit('user-offline', { userId });
+      }
+      console.log('Client disconnected:', socket.id);
+    } catch (error) {
+      console.error('Disconnect error:', error);
+    }
   });
 });
 

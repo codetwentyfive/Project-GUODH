@@ -1,6 +1,8 @@
 'use client';
 
 import { socketService } from './socket';
+import { userManager } from './userManager';
+import { mediaManager } from './mediaManager';
 
 type ConnectionState = 'new' | 'connecting' | 'connected' | 'disconnected' | 'failed' | 'closed';
 type ConnectionStateChangeCallback = (state: ConnectionState) => void;
@@ -25,12 +27,21 @@ class WebRTCService {
   }
 
   private setupPeerConnection() {
-    const configuration = {
+    if (this.peerConnection) {
+      console.log('[WebRTC] Cleaning up existing peer connection');
+      this.cleanup();
+    }
+
+    const configuration: RTCConfiguration = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
       ],
-    };
+      iceTransportPolicy: 'all',
+      bundlePolicy: 'balanced',
+      rtcpMuxPolicy: 'require',
+      iceCandidatePoolSize: 0
+    } as const;
 
     this.peerConnection = new RTCPeerConnection(configuration);
     console.log('[WebRTC] Peer connection created');
@@ -43,14 +54,23 @@ class WebRTCService {
     };
 
     this.peerConnection.onconnectionstatechange = () => {
-      const state = this.peerConnection?.connectionState as ConnectionState;
+      const state = this.peerConnection?.connectionState;
       console.log('[WebRTC] Connection state changed:', state);
-      this.connectionStateChangeCallbacks.forEach(callback => callback(state));
+      
+      if (state === 'connected') {
+        userManager.updateUserStatus('in-call');
+      } else if (state === 'failed' || state === 'disconnected') {
+        console.log('[WebRTC] Connection lost, cleaning up');
+        userManager.updateUserStatus('online');
+        this.cleanup();
+      }
+      
+      this.connectionStateChangeCallbacks.forEach(callback => callback(state as ConnectionState));
     };
 
     this.peerConnection.onicecandidate = ({ candidate }) => {
       if (candidate && this.currentCallId) {
-        console.log('[WebRTC] Sending ICE candidate');
+        console.log('[WebRTC] New ICE candidate');
         socketService.sendIceCandidate(this.currentCallId, candidate);
       }
     };
@@ -61,18 +81,35 @@ class WebRTCService {
 
     this.peerConnection.onsignalingstatechange = () => {
       console.log('[WebRTC] Signaling state:', this.peerConnection?.signalingState);
-    };
-
-    this.peerConnection.oniceconnectionstatechange = () => {
-      console.log('[WebRTC] ICE connection state:', this.peerConnection?.iceConnectionState);
+      if (this.peerConnection?.signalingState === 'closed') {
+        this.cleanup();
+      }
     };
   }
 
   async handleIncomingCall(from: string, offer: RTCSessionDescriptionInit): Promise<void> {
     try {
+      // Initialize media first
+      await mediaManager.initialize({ audio: true });
+      
       this.currentCallId = from;
       this.pendingOffer = offer;
       console.log('[WebRTC] Received call offer from:', from);
+      
+      // Set up peer connection
+      this.setupPeerConnection();
+      
+      // Add local tracks
+      const localStream = mediaManager.getLocalStream();
+      if (localStream) {
+        localStream.getTracks().forEach(track => {
+          this.peerConnection?.addTrack(track, localStream);
+        });
+      }
+      
+      // Set remote description
+      await this.peerConnection?.setRemoteDescription(offer);
+      console.log('[WebRTC] Remote description set for incoming call');
     } catch (error) {
       console.error('[WebRTC] Error handling incoming call:', error);
       this.cleanup();
@@ -81,24 +118,23 @@ class WebRTCService {
   }
 
   async acceptCall(): Promise<void> {
-    if (!this.pendingOffer || !this.currentCallId) {
+    if (!this.pendingOffer || !this.currentCallId || !this.peerConnection) {
+      console.error('[WebRTC] Cannot accept call: no pending call or connection');
       throw new Error('No pending call to accept');
     }
 
     try {
-      this.setupPeerConnection();
+      console.log('[WebRTC] Accepting call from:', this.currentCallId);
+      
+      // Create and set local description
+      const answer = await this.peerConnection.createAnswer();
+      await this.peerConnection.setLocalDescription(answer);
 
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach(track => {
-        this.peerConnection?.addTrack(track, stream);
-      });
-
-      await this.peerConnection?.setRemoteDescription(this.pendingOffer);
-      const answer = await this.peerConnection?.createAnswer();
-      await this.peerConnection?.setLocalDescription(answer);
-
-      socketService.sendAnswer(this.currentCallId, answer!);
+      // Send answer
+      socketService.sendAnswer(this.currentCallId, answer);
       console.log('[WebRTC] Call accepted and answer sent');
+      
+      // Clear pending offer
       this.pendingOffer = null;
     } catch (error) {
       console.error('[WebRTC] Error accepting call:', error);
@@ -110,22 +146,9 @@ class WebRTCService {
   async rejectCall(): Promise<void> {
     if (this.currentCallId) {
       console.log('[WebRTC] Rejecting call from:', this.currentCallId);
+      socketService.sendReject(this.currentCallId);
       this.cleanup();
     }
-  }
-
-  async handleIceCandidate(candidate: RTCIceCandidateInit): Promise<void> {
-    try {
-      await this.peerConnection?.addIceCandidate(candidate);
-      console.log('[WebRTC] ICE candidate added');
-    } catch (error) {
-      console.error('[WebRTC] Error adding ICE candidate:', error);
-      throw error;
-    }
-  }
-
-  onConnectionStateChange(callback: ConnectionStateChangeCallback): void {
-    this.connectionStateChangeCallbacks.push(callback);
   }
 
   endCall(): void {
@@ -134,16 +157,37 @@ class WebRTCService {
   }
 
   private cleanup(): void {
+    console.log('[WebRTC] Cleaning up resources');
+    
+    // Clean up media
+    mediaManager.cleanup();
+    
     if (this.peerConnection) {
+      // Close all transceivers
+      this.peerConnection.getTransceivers().forEach(transceiver => {
+        if (transceiver.stop) {
+          transceiver.stop();
+        }
+      });
+
+      // Close the connection
       this.peerConnection.close();
       this.peerConnection = null;
     }
+
     if (this.audioElement) {
       this.audioElement.srcObject = null;
     }
+
     this.currentCallId = null;
     this.pendingOffer = null;
-    this.connectionStateChangeCallbacks = [];
+    
+    // Update user status
+    userManager.updateUserStatus('online');
+  }
+
+  onConnectionStateChange(callback: ConnectionStateChangeCallback): void {
+    this.connectionStateChangeCallbacks.push(callback);
   }
 }
 
