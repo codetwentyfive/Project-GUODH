@@ -1,118 +1,110 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { CallManager } from '@/services/callManager';
-import { CallState, CallMetrics, CallEventCallback } from '@/types/call';
+import React, { createContext, useContext, useState, useCallback } from 'react';
 import { socketService } from '@/services/socket';
 
+type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+
+// Import the CallbackData type from the socket service
+type CallbackData = {
+  from?: string;
+  targetId?: string;
+  offer?: RTCSessionDescriptionInit;
+  answer?: RTCSessionDescriptionInit;
+  candidate?: RTCIceCandidateInit;
+  error?: string;
+  roomId?: string;
+  userId?: string;
+};
+
 interface CallContextType {
-  state: CallState;
-  metrics: CallMetrics | null;
-  startCall: (patientId: string, patientName: string) => Promise<void>;
-  endCall: () => Promise<void>;
+  connect: (userId: string) => Promise<void>;
+  connectionStatus: ConnectionStatus;
+  currentCall: {
+    peerId: string;
+    isIncoming: boolean;
+  } | null;
+  initiateCall: (targetId: string) => void;
+  acceptCall: (callerId: string) => void;
+  rejectCall: (callerId: string) => void;
+  endCall: () => void;
 }
 
-const CallContext = createContext<CallContextType | null>(null);
+const CallContext = createContext<CallContextType | undefined>(undefined);
 
 export function CallProvider({ children }: { children: React.ReactNode }) {
-  const [callManager] = useState(() => new CallManager());
-  const [state, setState] = useState<CallState>(() => callManager.getCurrentState());
-  const [metrics, setMetrics] = useState<CallMetrics | null>(null);
-  const [isRegistered, setIsRegistered] = useState(false);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
+  const [currentCall, setCurrentCall] = useState<{ peerId: string; isIncoming: boolean } | null>(null);
 
-  useEffect(() => {
-    let mounted = true;
+  const connect = useCallback(async (userId: string) => {
+    try {
+      setConnectionStatus('connecting');
+      await socketService.connect();
+      await socketService.register(userId);
+      setConnectionStatus('connected');
+    } catch (error) {
+      console.error('Connection error:', error);
+      setConnectionStatus('error');
+      throw error;
+    }
+  }, []);
 
-    // Initialize socket connection and register as caretaker
-    const initializeSocket = async () => {
-      try {
-        await socketService.connect();
-        await socketService.register('caretaker-1');
-        if (mounted) {
-          console.log('[CallContext] Socket connected and registered');
-          setIsRegistered(true);
-        }
-      } catch (error) {
-        console.error('[CallContext] Socket connection failed:', error);
-        if (mounted) {
-          setIsRegistered(false);
-        }
+  const initiateCall = useCallback((targetId: string) => {
+    setCurrentCall({ peerId: targetId, isIncoming: false });
+  }, []);
+
+  const acceptCall = useCallback((callerId: string) => {
+    setCurrentCall({ peerId: callerId, isIncoming: false });
+  }, []);
+
+  const rejectCall = useCallback((callerId: string) => {
+    socketService.sendReject(callerId);
+    setCurrentCall(null);
+  }, []);
+
+  const endCall = useCallback(() => {
+    if (currentCall) {
+      socketService.sendCallEnd(currentCall.peerId);
+      setCurrentCall(null);
+    }
+  }, [currentCall]);
+
+  React.useEffect(() => {
+    socketService.on('call-offer', (data: CallbackData) => {
+      if (data.from) {
+        setCurrentCall({ peerId: data.from, isIncoming: true });
       }
-    };
-
-    initializeSocket();
-
-    // Handle socket events
-    socketService.on('registration-success', () => {
-      if (mounted) setIsRegistered(true);
     });
 
-    socketService.on('registration-error', () => {
-      if (mounted) setIsRegistered(false);
+    socketService.on('call-ended', () => {
+      setCurrentCall(null);
     });
 
-    const handleStateChange: CallEventCallback<'statusChange'> = (_, newState) => {
-      if (mounted) {
-        console.log('[CallContext] State changed:', newState);
-        setState(newState);
-      }
-    };
-
-    const handleMetricsUpdate: CallEventCallback<'metricsUpdate'> = (_, newMetrics) => {
-      if (mounted) {
-        setMetrics(newMetrics);
-      }
-    };
-
-    callManager.addEventListener('statusChange', handleStateChange);
-    callManager.addEventListener('metricsUpdate', handleMetricsUpdate);
+    socketService.on('call-rejected', () => {
+      setCurrentCall(null);
+    });
 
     return () => {
-      mounted = false;
-      callManager.removeEventListener('statusChange', handleStateChange);
-      callManager.removeEventListener('metricsUpdate', handleMetricsUpdate);
       socketService.disconnect();
     };
-  }, [callManager]);
+  }, []);
 
-  const startCall = async (patientId: string, patientName: string) => {
-    if (!isRegistered) {
-      throw new Error('Cannot start call: not registered with signaling server');
-    }
-
-    try {
-      console.log('[CallContext] Starting call to patient:', patientId);
-      await callManager.startCall({
-        id: patientId,
-        name: patientName,
-        type: 'patient'
-      });
-    } catch (error) {
-      console.error('[CallContext] Failed to start call:', error);
-      throw error;
-    }
+  const value = {
+    connect,
+    connectionStatus,
+    currentCall,
+    initiateCall,
+    acceptCall,
+    rejectCall,
+    endCall,
   };
 
-  const endCall = async () => {
-    try {
-      console.log('[CallContext] Ending current call');
-      await callManager.endCall();
-    } catch (error) {
-      console.error('[CallContext] Failed to end call:', error);
-      throw error;
-    }
-  };
-
-  return (
-    <CallContext.Provider value={{ state, metrics, startCall, endCall }}>
-      {children}
-    </CallContext.Provider>
-  );
+  return <CallContext.Provider value={value}>{children}</CallContext.Provider>;
 }
 
 export function useCall() {
   const context = useContext(CallContext);
-  if (!context) {
+  if (context === undefined) {
     throw new Error('useCall must be used within a CallProvider');
   }
   return context;

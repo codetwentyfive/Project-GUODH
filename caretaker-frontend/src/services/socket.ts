@@ -2,248 +2,122 @@
 
 import { io, Socket } from 'socket.io-client';
 
-export interface CallbackData {
+type CallbackData = {
   from?: string;
   targetId?: string;
+  offer?: RTCSessionDescriptionInit;
+  answer?: RTCSessionDescriptionInit;
+  candidate?: RTCIceCandidateInit;
+  error?: string;
+  roomId?: string;
   userId?: string;
+};
+
+type EmitData = {
+  targetId: string;
   offer?: RTCSessionDescriptionInit;
   answer?: RTCSessionDescriptionInit;
   candidate?: RTCIceCandidateInit;
   roomId?: string;
-  error?: string;
-  reason?: string;
-}
+};
 
-type CallbackFunction = (data: CallbackData) => void;
-
-class SocketService {
+export class SocketService {
   private socket: Socket | null = null;
-  private callbacks: { [key: string]: CallbackFunction[] } = {};
-  private userId: string | null = null;
   private connectionPromise: Promise<void> | null = null;
-  private resolveConnection: (() => void) | null = null;
-  private currentRoomId: string | null = null;
-  private isRegistered: boolean = false;
-  private registrationPromise: Promise<void> | null = null;
-  private resolveRegistration: (() => void) | null = null;
 
-  connect(): Promise<void> {
-    if (this.socket?.connected && this.isRegistered) {
-      return Promise.resolve();
+  async connect() {
+    if (this.socket?.connected) {
+      return;
     }
 
-    if (this.connectionPromise) {
-      return this.connectionPromise;
+    if (!this.connectionPromise) {
+      this.connectionPromise = new Promise((resolve, reject) => {
+        const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3000';
+        
+        this.socket = io(socketUrl, {
+          autoConnect: false,
+          reconnectionDelay: 1000,
+          reconnectionDelayMax: 5000,
+          timeout: 20000,
+          transports: ['websocket']
+        });
+
+        this.socket.on('connect', () => {
+          console.log('Socket connected');
+          resolve();
+        });
+
+        this.socket.on('connect_error', (error) => {
+          console.error('Socket connection error:', error);
+          reject(error);
+        });
+
+        this.socket.on('connect_timeout', (timeout) => {
+          console.error('Socket connection timeout:', timeout);
+          reject(new Error('Connection timeout'));
+        });
+
+        this.socket.on('error', (error) => {
+          console.error('Socket error:', error);
+        });
+
+        this.socket.connect();
+      });
     }
-
-    this.connectionPromise = new Promise((resolve) => {
-      this.resolveConnection = resolve;
-    });
-
-    this.socket = io(process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3000', {
-      transports: ['websocket'],
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-      timeout: 20000,
-      autoConnect: false // Don't connect automatically, we'll handle it
-    });
-
-    // Set up event handlers before connecting
-    this.setupSocketEventHandlers();
-
-    // Explicitly connect the socket
-    this.socket.connect();
 
     return this.connectionPromise;
   }
 
-  private setupSocketEventHandlers() {
-    if (!this.socket) return;
+  async register(userId: string) {
+    if (!this.socket?.connected) {
+      throw new Error('Socket not connected');
+    }
 
-    this.socket.on('connect', () => {
-      console.log('[Socket] Connected to signaling server');
-      if (this.userId && !this.isRegistered) {
-        this.register(this.userId);
-      }
-      if (this.resolveConnection) {
-        this.resolveConnection();
-      }
-    });
-
-    this.socket.on('disconnect', (reason) => {
-      console.log('[Socket] Disconnected:', reason);
-      this.connectionPromise = null;
-      this.currentRoomId = null;
-      this.isRegistered = false;
-      if (reason === 'io server disconnect') {
-        // Server disconnected us, retry connection
-        this.socket?.connect();
-      }
-    });
-
-    this.socket.on('connect_error', (error) => {
-      console.error('[Socket] Connection error:', error);
-      if (this.resolveConnection) {
-        this.resolveConnection();
-      }
-    });
-
-    this.socket.on('connect_timeout', () => {
-      console.error('[Socket] Connection timeout');
-    });
-
-    // Handle registration events
-    this.socket.on('registration-success', ({ userId }) => {
-      console.log('[Socket] Registration successful:', userId);
-      this.isRegistered = true;
-      if (this.resolveRegistration) {
-        this.resolveRegistration();
-      }
-      this.emit('registrationSuccess', { userId });
-    });
-
-    this.socket.on('registration-error', ({ error }) => {
-      console.error('[Socket] Registration failed:', error);
-      this.isRegistered = false;
-      this.emit('registrationError', { error });
-    });
-
-    // Handle call events
-    this.socket.on('call-answered', ({ from, answer, roomId }) => {
-      console.log('[Socket] Received call answer from:', from);
-      this.currentRoomId = roomId;
-      this.emit('callAnswered', { from, answer, roomId });
-    });
-
-    this.socket.on('call-rejected', ({ from }) => {
-      console.log('[Socket] Call rejected by:', from);
-      this.emit('callRejected', { from });
-    });
-
-    this.socket.on('call-failed', ({ error }) => {
-      console.error('[Socket] Call failed:', error);
-      this.emit('callFailed', { error });
-    });
-
-    // Handle ICE candidates
-    this.socket.on('ice-candidate', ({ from, candidate, roomId }) => {
-      console.log('[Socket] Received ICE candidate from:', from);
-      this.emit('iceCandidate', { from, candidate, roomId });
-    });
-
-    // Handle call end
-    this.socket.on('call-ended', ({ from, roomId, reason }) => {
-      console.log('[Socket] Call ended by:', from, reason ? `(${reason})` : '');
-      this.currentRoomId = null;
-      this.emit('callEnded', { from, roomId, reason });
-    });
-
-    // Set up event handlers
-    Object.keys(this.callbacks).forEach(event => {
-      this.callbacks[event].forEach(callback => {
-        this.socket?.on(event, callback);
+    return new Promise<void>((resolve, reject) => {
+      this.socket!.emit('register', { userId }, (response: { success: boolean; error?: string }) => {
+        if (response.success) {
+          resolve();
+        } else {
+          reject(new Error(response.error || 'Registration failed'));
+        }
       });
     });
   }
 
-  async waitForConnection(): Promise<void> {
-    if (this.socket?.connected && this.isRegistered) {
-      return;
-    }
-    await this.connect();
-    if (!this.isRegistered && this.userId) {
-      await this.register(this.userId);
-    }
-  }
-
-  register(userId: string): Promise<void> {
-    this.userId = userId;
-    
-    if (this.registrationPromise) {
-      return this.registrationPromise;
-    }
-
-    this.registrationPromise = new Promise((resolve) => {
-      this.resolveRegistration = resolve;
-    });
-
+  emit(event: string, data: EmitData) {
     if (!this.socket?.connected) {
-      console.log('[Socket] Not connected, will register after connection');
-      this.socket?.connect();
-      return this.registrationPromise;
+      throw new Error('Socket not connected');
     }
-
-    console.log('[Socket] Registering user:', userId);
-    this.socket.emit('register', userId);
-    return this.registrationPromise;
+    this.socket.emit(event, data);
   }
 
-  async sendOffer(targetId: string, offer: RTCSessionDescriptionInit): Promise<void> {
-    await this.waitForConnection();
-    if (!this.isRegistered) {
-      throw new Error('Socket service not registered');
+  sendReject(targetId: string) {
+    if (!this.socket?.connected) {
+      throw new Error('Socket not connected');
     }
-    console.log('[Socket] Sending offer to:', targetId, 'from:', this.userId);
-    this.socket!.emit('call-offer', { targetId, offer });
-    this.currentRoomId = `${this.userId}-${targetId}`;
+    this.socket.emit('call-reject', { targetId });
   }
 
-  async sendIceCandidate(targetId: string, candidate: RTCIceCandidateInit): Promise<void> {
-    await this.waitForConnection();
-    if (!this.isRegistered) {
-      console.error('[Socket] Cannot send ICE candidate: not registered');
-      return;
+  sendCallEnd(targetId: string) {
+    if (!this.socket?.connected) {
+      throw new Error('Socket not connected');
     }
-    if (!this.currentRoomId) {
-      console.warn('[Socket] No active room for ICE candidate');
-      return;
-    }
-    console.log('[Socket] Sending ICE candidate to:', targetId, 'from:', this.userId);
-    this.socket!.emit('ice-candidate', { targetId, candidate, roomId: this.currentRoomId });
+    this.socket.emit('call-end', { targetId });
   }
 
-  async endCall(targetId: string): Promise<void> {
-    await this.waitForConnection();
-    if (!this.isRegistered) {
-      console.error('[Socket] Cannot end call: not registered');
-      return;
-    }
-    if (!this.currentRoomId) {
-      console.warn('[Socket] No active room to end call');
-      return;
-    }
-    console.log('[Socket] Ending call with:', targetId, 'from:', this.userId);
-    this.socket!.emit('end-call', { targetId, roomId: this.currentRoomId });
-    this.currentRoomId = null;
-  }
-
-  on(event: string, callback: CallbackFunction): void {
-    if (!this.callbacks[event]) {
-      this.callbacks[event] = [];
-    }
-    this.callbacks[event].push(callback);
+  on(event: string, callback: (data: CallbackData) => void) {
     this.socket?.on(event, callback);
   }
 
-  emit(event: string, data: CallbackData): void {
-    if (this.callbacks[event]) {
-      this.callbacks[event].forEach(callback => callback(data));
-    }
+  off(event: string, callback: (data: CallbackData) => void) {
+    this.socket?.off(event, callback);
   }
 
-  disconnect(): void {
+  disconnect() {
     if (this.socket) {
       this.socket.disconnect();
       this.socket = null;
-      this.userId = null;
       this.connectionPromise = null;
-      this.resolveConnection = null;
-      this.currentRoomId = null;
-      this.isRegistered = false;
-      this.registrationPromise = null;
-      this.resolveRegistration = null;
     }
   }
 }

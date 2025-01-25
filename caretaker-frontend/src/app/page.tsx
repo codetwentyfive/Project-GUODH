@@ -1,82 +1,78 @@
 'use client';
 
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { CallProvider } from '@/contexts/CallContext';
-import { CallScreen } from '@/components/CallScreen';
+import { useEffect } from 'react';
 import { useCall } from '@/contexts/CallContext';
+import { mockUserService } from '@/services/mockUsers';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { CallScreen } from '@/components/CallScreen';
+import toast from 'react-hot-toast';
 
-interface Patient {
-  id: string;
-  name: string;
-  room: string;
-  lastCheck: string;
-  priority: 'normal' | 'high' | 'urgent';
-  notes?: string;
-}
+export default function Home() {
+  const { connect, connectionStatus, currentCall } = useCall();
 
-const MOCK_PATIENTS: Patient[] = [
-  {
-    id: 'patient-1',
-    name: 'John Doe',
-    room: '101',
-    lastCheck: '10:30 AM',
-    priority: 'normal',
-    notes: 'Regular checkup needed'
-  },
-  {
-    id: 'patient-2',
-    name: 'Jane Smith',
-    room: '102',
-    lastCheck: '11:15 AM',
-    priority: 'high',
-    notes: 'Blood pressure monitoring'
-  }
-];
-
-function PatientList() {
-  const { state, startCall } = useCall();
-  const isInCall = state.status !== 'idle';
+  useEffect(() => {
+    // Connect as caretaker-1 on mount
+    connect('caretaker-1').catch((error) => {
+      console.error('Failed to connect:', error);
+      toast.error('Failed to connect to server');
+    });
+  }, [connect]);
 
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
-      {MOCK_PATIENTS.map((patient) => (
-        <Card key={patient.id} className="p-4 hover:shadow-md transition-shadow">
-          <div className="flex justify-between items-start">
-            <div>
-              <h3 className="font-medium">{patient.name}</h3>
-              <p className="text-sm text-muted-foreground">Room {patient.room}</p>
-              <div className="mt-2 space-y-1">
-                <p className="text-sm">Last Check: {patient.lastCheck}</p>
-                <p className="text-sm">Priority: {patient.priority}</p>
-                {patient.notes && (
-                  <p className="text-sm text-muted-foreground">{patient.notes}</p>
-                )}
-              </div>
-            </div>
-            <Button
-              onClick={() => startCall(patient.id, patient.name)}
-              disabled={isInCall}
-            >
-              Call Patient
-            </Button>
+    <main className="container mx-auto p-4">
+      <Card className="mb-4">
+        <CardHeader>
+          <CardTitle>Caretaker Dashboard</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center gap-4">
+            <Badge variant={connectionStatus === 'connected' ? 'success' : 'warning'}>
+              {connectionStatus === 'connected' ? 'Connected' : 'Connecting...'}
+            </Badge>
           </div>
-        </Card>
-      ))}
-    </div>
+        </CardContent>
+      </Card>
+
+      {currentCall ? (
+        <CallScreen 
+          peerId={currentCall.peerId} 
+          isIncoming={currentCall.isIncoming} 
+        />
+      ) : (
+        <PatientList />
+      )}
+    </main>
   );
 }
 
-export default function CaretakerPage() {
+function PatientList() {
+  const { initiateCall } = useCall();
+  const patients = mockUserService.getAvailablePatients();
+
   return (
-    <CallProvider>
-      <main className="min-h-screen bg-background p-8">
-        <h1 className="text-3xl font-semibold text-center mb-8 text-primary">
-          Caretaker Dashboard
-        </h1>
-        <PatientList />
-        <CallScreen />
-      </main>
-    </CallProvider>
+    <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+      {patients.map((patient) => (
+        <Card key={patient.id}>
+          <CardHeader>
+            <CardTitle>{patient.name}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between">
+              <Badge variant={patient.status === 'available' ? 'success' : 'warning'}>
+                {patient.status}
+              </Badge>
+              <Button 
+                onClick={() => initiateCall(patient.id)}
+                disabled={patient.status !== 'available'}
+              >
+                Start Call
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+    </div>
   );
 }
