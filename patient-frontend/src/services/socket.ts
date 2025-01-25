@@ -36,6 +36,7 @@ class SocketService {
       return this.connectionPromise;
     }
 
+    const url = process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3000';
     this.connectionPromise = new Promise((resolve, reject) => {
       try {
         this.resolveConnection = resolve;
@@ -47,13 +48,12 @@ class SocketService {
         }
 
         console.log('[Socket] Initializing connection...');
-        this.socket = io(process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3000', {
-          reconnection: true,
-          reconnectionAttempts: this.MAX_RECONNECT_ATTEMPTS,
-          reconnectionDelay: this.RECONNECT_INTERVAL,
-          timeout: 10000,
+        this.socket = io(url, {
+          autoConnect: false,
           transports: ['websocket'],
-          autoConnect: false // Don't connect automatically
+          reconnectionDelay: 1000,
+          reconnectionDelayMax: 5000,
+          timeout: 20000,
         });
 
         // Set up all event handlers before connecting
@@ -112,8 +112,11 @@ class SocketService {
       }
     });
 
-    this.socket.on('connect_timeout', () => {
-      console.error('[Socket] Connection timeout');
+    this.socket.on('connect_timeout', (error) => {
+      console.error('[Socket] Connection timeout:', error);
+      if (this.resolveConnection) {
+        this.resolveConnection();
+      }
     });
 
     this.socket.on('error', (error) => {
@@ -214,17 +217,39 @@ class SocketService {
 
     return new Promise((resolve, reject) => {
       console.log('[Socket] Attempting to register user:', userId);
-      this.socket!.emit('register', { userId }, (response: { success: boolean; error?: string }) => {
-        if (response.success) {
-          console.log('[Socket] Registered successfully');
-          this.isRegistered = true;
-          resolve();
-        } else {
-          console.error('[Socket] Registration failed:', response.error);
-          this.isRegistered = false;
-          reject(new Error(response.error || 'Registration failed'));
-        }
-      });
+      
+      // Set up one-time event handlers for registration response
+      const handleSuccess = () => {
+        console.log('[Socket] Registered successfully');
+        this.isRegistered = true;
+        cleanup();
+        resolve();
+      };
+
+      const handleError = (error: { error: string }) => {
+        console.error('[Socket] Registration failed:', error.error);
+        this.isRegistered = false;
+        cleanup();
+        reject(new Error(error.error || 'Registration failed'));
+      };
+
+      const cleanup = () => {
+        this.socket?.off('registration-success', handleSuccess);
+        this.socket?.off('registration-error', handleError);
+      };
+
+      // Register event handlers
+      this.socket!.on('registration-success', handleSuccess);
+      this.socket!.on('registration-error', handleError);
+
+      // Send registration request
+      this.socket!.emit('register', userId);
+
+      // Set timeout for registration
+      setTimeout(() => {
+        cleanup();
+        reject(new Error('Registration timeout'));
+      }, 5000);
     });
   }
 
@@ -287,9 +312,10 @@ class SocketService {
     this.socket.emit('ice-candidate', { targetId, candidate });
   }
 
-  endCall(targetId: string): void {
+  sendCallEnd(targetId: string): void {
     if (!this.socket?.connected) {
-      throw new Error('Socket not connected');
+      console.error('[Socket] Cannot end call: socket not connected');
+      return;
     }
     this.socket.emit('call-end', { targetId });
   }

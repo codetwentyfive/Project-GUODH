@@ -1,154 +1,209 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
-import { socketService } from '@/services/socket';
-import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { CallScreen } from '@/components/CallScreen';
+import { useEffect, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
+import { useCall } from '@/contexts/CallContext'
+import { Card } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import { Calendar, Phone, Signal, Settings, User as UserIcon } from 'lucide-react'
+import { mockUserService, type User as PatientUser } from '@/services/mockUsers'
+import { useRouter } from 'next/navigation'
+import toast from 'react-hot-toast'
+import { CallScreen } from '@/components/CallScreen'
 
-export default function PatientPage() {
-  const searchParams = useSearchParams();
-  const patientId = searchParams.get('patientId');
-  const [connectionState, setConnectionState] = useState<'connecting' | 'connected' | 'error'>('connecting');
-  const [callState, setCallState] = useState<{
-    isIncoming: boolean;
-    callerId?: string;
-  } | null>(null);
-  const [error, setError] = useState<string | null>(null);
+export default function Home() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const { connect, connectionStatus, currentCall, acceptCall, rejectCall, endCall } = useCall()
+  const patientId = searchParams.get('patientId')
+  const [user, setUser] = useState<PatientUser | undefined>()
+  const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    if (!patientId) {
-      setError('No patient ID provided');
-      setConnectionState('error');
-      return;
-    }
-
-    let isInitializing = true;
-    let retryTimeout: NodeJS.Timeout;
-
-    const initializeConnection = async () => {
+    async function initializeUser() {
       try {
-        await socketService.connect();
-        await socketService.register(patientId);
-        if (isInitializing) {
-          setConnectionState('connected');
-          setError(null);
+        if (!patientId) {
+          // If no patientId is provided, redirect to patient-1 for demo purposes
+          router.push('/?patientId=patient-1')
+          return
         }
+
+        const userDetails = mockUserService.getPatientDetails(patientId)
+        if (!userDetails) {
+          toast.error('Invalid patient ID')
+          router.push('/?patientId=patient-1')
+          return
+        }
+
+        setUser(userDetails)
+        await connect(patientId)
+        toast.success('Connected successfully')
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to connect. Please refresh the page.';
-        if (isInitializing) {
-          setError(message);
-          setConnectionState('error');
-        }
+        console.error('Connection error:', error)
+        toast.error('Failed to connect. Please try again.')
+      } finally {
+        setIsLoading(false)
       }
-    };
-
-    // Handle socket events
-    socketService.on('registration-success', () => {
-      setConnectionState('connected');
-      setError(null);
-    });
-
-    socketService.on('registration-error', (data) => {
-      setError(data.error || 'Registration failed');
-      setConnectionState('error');
-    });
-
-    socketService.on('call-offer', (data) => {
-      console.log('Received call offer:', data);
-      setCallState({
-        isIncoming: true,
-        callerId: data.from
-      });
-    });
-
-    socketService.on('call-ended', () => {
-      console.log('Call ended');
-      setCallState(null);
-    });
-
-    socketService.on('call-failed', (data) => {
-      console.log('Call failed:', data);
-      setError(data.error || 'Call failed');
-      setCallState(null);
-    });
-
-    initializeConnection();
-
-    return () => {
-      isInitializing = false;
-      if (retryTimeout) {
-        clearTimeout(retryTimeout);
-      }
-      socketService.disconnect();
-    };
-  }, [patientId]);
-
-  const handleAcceptCall = () => {
-    if (callState?.callerId) {
-      // Accept call logic will be handled by CallScreen component
-      setCallState(prev => prev ? { ...prev, isIncoming: false } : null);
     }
-  };
 
-  const handleRejectCall = () => {
-    if (callState?.callerId) {
-      socketService.sendReject(callState.callerId);
-      setCallState(null);
-    }
-  };
+    initializeUser()
+  }, [patientId, connect, router])
 
-  if (error) {
+  if (isLoading || !user) {
     return (
-      <Card className="fixed inset-0 m-auto w-80 h-40 flex items-center justify-center">
+      <div className="flex items-center justify-center min-h-screen">
         <div className="text-center">
-          <p className="text-destructive">{error}</p>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading patient details...</p>
         </div>
-      </Card>
-    );
+      </div>
+    )
   }
 
-  if (connectionState === 'connecting') {
+  // Show call screen if there's an active call
+  if (currentCall) {
     return (
-      <Card className="fixed inset-0 m-auto w-80 h-40 flex items-center justify-center">
-        <div className="text-center">
-          <div className="mb-4">
-            <div className="w-12 h-12 rounded-full bg-muted animate-pulse mx-auto" />
-          </div>
-          <p>Connecting...</p>
-        </div>
-      </Card>
-    );
-  }
-
-  if (callState?.isIncoming) {
-    return (
-      <Card className="fixed bottom-4 right-4 p-4 w-80 shadow-lg bg-white">
-        <div className="text-center">
-          <p className="mb-4">Incoming call from caretaker</p>
-          <div className="flex justify-center gap-4">
-            <Button onClick={handleAcceptCall} variant="default">
-              Accept
-            </Button>
-            <Button onClick={handleRejectCall} variant="destructive">
-              Reject
-            </Button>
-          </div>
-        </div>
-      </Card>
-    );
-  }
-
-  if (callState && !callState.isIncoming) {
-    return <CallScreen peerId={callState.callerId!} onCallEnd={() => setCallState(null)} />;
+      <CallScreen
+        peerId={currentCall.peerId}
+        isIncoming={currentCall.isIncoming}
+        onAccept={() => acceptCall(currentCall.peerId)}
+        onReject={() => rejectCall(currentCall.peerId)}
+        onEnd={endCall}
+      />
+    )
   }
 
   return (
-    <Card className="fixed inset-0 m-auto w-80 h-40 flex items-center justify-center">
-      <div className="text-center">
-        <p>Ready for calls</p>
+    <div className="space-y-6">
+      {/* Welcome Section */}
+      <div className="md:flex md:items-center md:justify-between">
+        <div className="min-w-0 flex-1">
+          <h2 className="text-2xl font-bold leading-7 text-gray-900 sm:truncate sm:text-3xl sm:tracking-tight">
+            Welcome Back, {user.name}
+          </h2>
+          <div className="mt-1 flex flex-col sm:mt-0 sm:flex-row sm:flex-wrap sm:space-x-6">
+            <div className="mt-2 flex items-center text-sm text-gray-500">
+              <Signal className="mr-1.5 h-5 w-5 flex-shrink-0 text-gray-400" />
+              Status: {' '}
+              <Badge variant={connectionStatus === 'connected' ? 'success' : 'warning'} className="ml-2">
+                {connectionStatus === 'connected' ? 'Online' : 'Connecting...'}
+              </Badge>
+            </div>
+            <div className="mt-2 flex items-center text-sm text-gray-500">
+              <UserIcon className="mr-1.5 h-5 w-5 flex-shrink-0 text-gray-400" />
+              Patient ID: {user.id}
+            </div>
+          </div>
+        </div>
       </div>
-    </Card>
-  );
+
+      {/* Quick Actions */}
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        <Card className="p-6">
+          <div className="flex items-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-indigo-50">
+              <Calendar className="h-6 w-6 text-indigo-600" />
+            </div>
+            <div className="ml-4">
+              <h3 className="text-lg font-medium text-gray-900">Upcoming Calls</h3>
+              <p className="mt-1 text-sm text-gray-500">View your scheduled appointments</p>
+            </div>
+          </div>
+          <div className="mt-4">
+            <Button variant="outline" className="w-full">
+              View Schedule
+            </Button>
+          </div>
+        </Card>
+
+        <Card className="p-6">
+          <div className="flex items-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-green-50">
+              <Phone className="h-6 w-6 text-green-600" />
+            </div>
+            <div className="ml-4">
+              <h3 className="text-lg font-medium text-gray-900">Available Caretakers</h3>
+              <p className="mt-1 text-sm text-gray-500">
+                {mockUserService.getAvailableCaretakers().length} caretakers online
+              </p>
+            </div>
+          </div>
+          <div className="mt-4">
+            <Button variant="outline" className="w-full">
+              View Caretakers
+            </Button>
+          </div>
+        </Card>
+
+        <Card className="p-6">
+          <div className="flex items-center">
+            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-blue-50">
+              <Settings className="h-6 w-6 text-blue-600" />
+            </div>
+            <div className="ml-4">
+              <h3 className="text-lg font-medium text-gray-900">Call Settings</h3>
+              <p className="mt-1 text-sm text-gray-500">Configure your call preferences</p>
+            </div>
+          </div>
+          <div className="mt-4">
+            <Button variant="outline" className="w-full">
+              Configure
+            </Button>
+          </div>
+        </Card>
+      </div>
+
+      {/* Connection Status */}
+      <Card className="p-6">
+        <h3 className="text-lg font-medium text-gray-900 mb-4">Connection Details</h3>
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <Signal className="h-5 w-5 text-gray-400 mr-2" />
+              <span className="text-sm font-medium text-gray-700">WebRTC Status</span>
+            </div>
+            <Badge variant={connectionStatus === 'connected' ? 'success' : 'warning'}>
+              {connectionStatus === 'connected' ? 'Connected' : 'Connecting'}
+            </Badge>
+          </div>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center">
+              <UserIcon className="h-5 w-5 text-gray-400 mr-2" />
+              <span className="text-sm font-medium text-gray-700">User Status</span>
+            </div>
+            <Badge variant={user.status === 'available' ? 'success' : 'warning'}>
+              {user.status.charAt(0).toUpperCase() + user.status.slice(1)}
+            </Badge>
+          </div>
+        </div>
+      </Card>
+
+      {/* Call History Preview */}
+      <Card className="p-6">
+        <h3 className="text-lg font-medium text-gray-900 mb-4">Recent Activity</h3>
+        <div className="divide-y divide-gray-200">
+          {[
+            { id: 1, type: 'Incoming Call', from: 'Dr. Emily Brown', date: '2024-01-24', status: 'Completed', duration: '15 mins' },
+            { id: 2, type: 'Outgoing Call', from: 'Dr. Michael Wilson', date: '2024-01-23', status: 'Missed', duration: '-' },
+            { id: 3, type: 'Incoming Call', from: 'Dr. Emily Brown', date: '2024-01-22', status: 'Completed', duration: '30 mins' },
+          ].map((call) => (
+            <div key={call.id} className="py-4 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-medium text-gray-900">{call.type}</p>
+                <p className="text-xs text-gray-500">From: {call.from}</p>
+                <p className="text-xs text-gray-500">{call.date}</p>
+              </div>
+              <div className="flex items-center">
+                <Badge variant={call.status === 'Completed' ? 'success' : 'destructive'}>
+                  {call.status}
+                </Badge>
+                <span className="ml-4 text-sm text-gray-500">{call.duration}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </div>
+  )
 }
