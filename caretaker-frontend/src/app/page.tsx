@@ -17,7 +17,7 @@ interface Patient {
 
 const MOCK_PATIENTS: Patient[] = [
   {
-    id: 'john-doe',
+    id: 'patient-1',
     name: 'John Doe',
     room: '101',
     lastCheck: '10:30 AM',
@@ -25,7 +25,7 @@ const MOCK_PATIENTS: Patient[] = [
     notes: 'Regular checkup needed'
   },
   {
-    id: 'jane-smith',
+    id: 'patient-2',
     name: 'Jane Smith',
     room: '102',
     lastCheck: '11:15 AM',

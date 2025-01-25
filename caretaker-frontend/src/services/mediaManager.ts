@@ -147,4 +147,4 @@ class MediaManager {
 }
 
 export const mediaManager = new MediaManager();
-export type { MediaConstraints, MediaState }; 
+export type { MediaConstraints, MediaState };

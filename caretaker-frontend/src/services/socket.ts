@@ -40,14 +40,27 @@ class SocketService {
       this.resolveConnection = resolve;
     });
 
-    this.socket = io('http://localhost:3000', {
+    this.socket = io(process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:3000', {
       transports: ['websocket'],
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
-      timeout: 20000
+      timeout: 20000,
+      autoConnect: false // Don't connect automatically, we'll handle it
     });
+
+    // Set up event handlers before connecting
+    this.setupSocketEventHandlers();
+
+    // Explicitly connect the socket
+    this.socket.connect();
+
+    return this.connectionPromise;
+  }
+
+  private setupSocketEventHandlers() {
+    if (!this.socket) return;
 
     this.socket.on('connect', () => {
       console.log('[Socket] Connected to signaling server');
@@ -72,6 +85,13 @@ class SocketService {
 
     this.socket.on('connect_error', (error) => {
       console.error('[Socket] Connection error:', error);
+      if (this.resolveConnection) {
+        this.resolveConnection();
+      }
+    });
+
+    this.socket.on('connect_timeout', () => {
+      console.error('[Socket] Connection timeout');
     });
 
     // Handle registration events
@@ -126,8 +146,6 @@ class SocketService {
         this.socket?.on(event, callback);
       });
     });
-
-    return this.connectionPromise;
   }
 
   async waitForConnection(): Promise<void> {

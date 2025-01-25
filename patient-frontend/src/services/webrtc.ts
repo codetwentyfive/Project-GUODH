@@ -191,4 +191,4 @@ class WebRTCService {
   }
 }
 
-export const webRTCService = new WebRTCService(); 
+export const webRTCService = new WebRTCService();

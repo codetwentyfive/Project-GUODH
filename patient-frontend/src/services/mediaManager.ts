@@ -146,4 +146,4 @@ class MediaManager {
   }
 }
 
-export const mediaManager = new MediaManager(); 
+export const mediaManager = new MediaManager();
