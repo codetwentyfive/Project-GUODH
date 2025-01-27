@@ -1,12 +1,19 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
-import twilio from 'twilio';
+import nodemailer from 'nodemailer';
 
 const prisma = new PrismaClient();
-const client = twilio(
-  process.env.TWILIO_ACCOUNT_SID,
-  process.env.TWILIO_AUTH_TOKEN
-);
+
+// Configure email transport
+const transporter = nodemailer.createTransport({
+  host: process.env.SMTP_HOST,
+  port: parseInt(process.env.SMTP_PORT || '587'),
+  secure: process.env.SMTP_SECURE === 'true',
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+});
 
 interface AuthRequest extends Request {
   user?: {
@@ -28,6 +35,9 @@ export const initiateCall = async (req: AuthRequest, res: Response) => {
       where: {
         id: patientId,
         caretakerId
+      },
+      include: {
+        caretaker: true
       }
     });
 
@@ -35,28 +45,27 @@ export const initiateCall = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ error: 'Patient not found' });
     }
 
+    // Create a unique room ID for this call
+    const roomId = `${patientId}-${Date.now()}`;
+
     // Create call log entry
     const callLog = await prisma.callLog.create({
       data: {
         patientId,
-        startTime: new Date()
+        startTime: new Date(),
+        isWebRTC: true,
+        roomId
       }
-    });
-
-    // Initiate call with Twilio
-    const call = await client.calls.create({
-      url: `${process.env.WEBHOOK_BASE_URL}/api/calls/twiml/${callLog.id}`,
-      to: patient.phoneNumber,
-      from: process.env.TWILIO_PHONE_NUMBER!,
-      record: patient.recordCalls,
-      statusCallback: `${process.env.WEBHOOK_BASE_URL}/api/calls/status/${callLog.id}`,
-      statusCallbackEvent: ['completed']
     });
 
     res.json({
       message: 'Call initiated',
-      callSid: call.sid,
-      callLogId: callLog.id
+      roomId,
+      callLogId: callLog.id,
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
     });
   } catch (error) {
     console.error('Error initiating call:', error);
@@ -64,66 +73,10 @@ export const initiateCall = async (req: AuthRequest, res: Response) => {
   }
 };
 
-export const handleTwiML = async (req: Request, res: Response) => {
-  const { callLogId } = req.params;
-  const twiml = new twilio.twiml.VoiceResponse();
-
-  try {
-    // Add basic voice message
-    twiml.say(
-      { voice: 'alice' },
-      'Hello, this is CareCall checking in. How are you doing today?'
-    );
-
-    // Start recording if enabled for this patient
-    const callLog = await prisma.callLog.findUnique({
-      where: { id: callLogId },
-      include: { patient: true }
-    });
-
-    if (callLog?.patient.recordCalls) {
-      twiml.record({
-        action: `${process.env.WEBHOOK_BASE_URL}/api/calls/recording/${callLogId}`,
-        transcribe: true,
-        transcribeCallback: `${process.env.WEBHOOK_BASE_URL}/api/calls/transcription/${callLogId}`
-      });
-    }
-
-    res.type('text/xml');
-    res.send(twiml.toString());
-  } catch (error) {
-    console.error('Error generating TwiML:', error);
-    res.status(500).json({ error: 'Error generating call instructions' });
-  }
-};
-
-export const handleCallStatus = async (req: Request, res: Response) => {
-  const { callLogId } = req.params;
-  const { CallDuration, CallStatus } = req.body;
-
-  try {
-    if (CallStatus === 'completed') {
-      await prisma.callLog.update({
-        where: { id: callLogId },
-        data: {
-          endTime: new Date(),
-          duration: parseInt(CallDuration) || 0
-        }
-      });
-    }
-
-    res.sendStatus(200);
-  } catch (error) {
-    console.error('Error updating call status:', error);
-    res.status(500).json({ error: 'Error updating call status' });
-  }
-};
-
 export const handleTranscription = async (req: Request, res: Response) => {
-  const { callLogId } = req.params;
-  const { TranscriptionText } = req.body;
-
   try {
+    const { callLogId, transcription } = req.body;
+
     const callLog = await prisma.callLog.findUnique({
       where: { id: callLogId },
       include: {
@@ -140,43 +93,63 @@ export const handleTranscription = async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Call log not found' });
     }
 
-    // Simple keyword detection
-    const detectedKeywords = callLog.patient.keywords
-      .filter(keyword => 
-        TranscriptionText.toLowerCase().includes(keyword.word.toLowerCase())
-      )
-      .map(keyword => keyword.word);
-
-    // Update call log with transcription and detected keywords
+    // Update call log with transcription
     await prisma.callLog.update({
       where: { id: callLogId },
-      data: {
-        transcription: TranscriptionText,
-        detectedKeywords
-      }
+      data: { transcribedText: transcription }
     });
 
-    // If keywords detected, notify caretaker
+    // Check for keywords
+    const detectedKeywords = callLog.patient.keywords.filter(keyword => 
+      transcription.toLowerCase().includes(keyword.text.toLowerCase())
+    );
+
     if (detectedKeywords.length > 0) {
-      // Send SMS notification using Twilio
-      await client.messages.create({
-        body: `Alert: Keywords detected in patient call: ${detectedKeywords.join(', ')}`,
-        to: callLog.patient.caretaker.phone,
-        from: process.env.TWILIO_PHONE_NUMBER!
+      // Send email notification
+      await transporter.sendMail({
+        from: process.env.SMTP_FROM,
+        to: callLog.patient.caretaker.email,
+        subject: 'Alert: Keywords Detected in Patient Call',
+        html: `
+          <h2>Keywords Detected</h2>
+          <p>Patient: ${callLog.patient.name}</p>
+          <p>Detected Keywords: ${detectedKeywords.map(k => k.text).join(', ')}</p>
+          <p>Transcription: ${transcription}</p>
+        `
       });
 
+      // Update call log to mark notification sent
       await prisma.callLog.update({
         where: { id: callLogId },
-        data: {
-          notificationSent: true
-        }
+        data: { notificationSent: true }
       });
     }
 
-    res.sendStatus(200);
+    res.json({ 
+      message: 'Transcription processed',
+      detectedKeywords: detectedKeywords.map(k => k.text)
+    });
   } catch (error) {
     console.error('Error handling transcription:', error);
-    res.status(500).json({ error: 'Error handling transcription' });
+    res.status(500).json({ error: 'Error processing transcription' });
+  }
+};
+
+export const endCall = async (req: Request, res: Response) => {
+  try {
+    const { callLogId } = req.params;
+
+    await prisma.callLog.update({
+      where: { id: callLogId },
+      data: {
+        endTime: new Date()
+      }
+    });
+
+    res.json({ message: 'Call ended successfully' });
+  } catch (error) {
+    console.error('Error ending call:', error);
+    res.status(500).json({ error: 'Error ending call' });
   }
 };
 

@@ -26,6 +26,7 @@ model User {
 
 model Patient {
   id           String    @id @default(uuid())
+  @@index([caretakerId])
   name         String
   phoneNumber  String
   recordCalls  Boolean   @default(false)
@@ -38,8 +39,8 @@ model Patient {
 }
 
 model Keyword {
-  id        String   @id @default(uuid())
-  word      String
+  id        String   @id @default(cuid())
+  text      String
   patientId String
   patient   Patient  @relation(fields: [patientId], references: [id])
   createdAt DateTime @default(now())
@@ -49,15 +50,14 @@ model Keyword {
 model CallLog {
   id              String    @id @default(cuid())
   patientId       String
-  startTime       DateTime  @default(now())
+  patient         Patient   @relation(fields: [patientId], references: [id])
+  startTime       DateTime
   endTime         DateTime?
   duration        Int?
-  transcription   String?
-  recordingUrl    String?
-  detectedKeywords String[]
+  isWebRTC        Boolean   @default(true)
+  roomId          String?
+  transcribedText String?
   notificationSent Boolean  @default(false)
-  isWebRTC        Boolean  @default(false)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
-  patient         Patient   @relation(fields: [patientId], references: [id])
 }
