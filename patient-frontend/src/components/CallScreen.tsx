@@ -23,7 +23,7 @@ export function CallScreen({ peerId, isIncoming = false, onAccept, onReject, onE
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const [callStatus, setCallStatus] = useState<'connecting' | 'connected' | 'ended'>('connecting');
   const [callDuration, setCallDuration] = useState(0);
-  const durationRef = useRef<NodeJS.Timeout>();
+  const durationRef = useRef<NodeJS.Timeout | undefined>(undefined);
   const peerUser = mockUserService.getUser(peerId);
 
   useEffect(() => {
@@ -41,12 +41,15 @@ export function CallScreen({ peerId, isIncoming = false, onAccept, onReject, onE
 
     return () => {
       // Cleanup media streams
-      if (localVideoRef.current?.srcObject) {
-        const stream = localVideoRef.current.srcObject as MediaStream;
+      const localVideo = localVideoRef.current;
+      const remoteVideo = remoteVideoRef.current;
+      
+      if (localVideo?.srcObject) {
+        const stream = localVideo.srcObject as MediaStream;
         stream.getTracks().forEach(track => track.stop());
       }
-      if (remoteVideoRef.current?.srcObject) {
-        const stream = remoteVideoRef.current.srcObject as MediaStream;
+      if (remoteVideo?.srcObject) {
+        const stream = remoteVideo.srcObject as MediaStream;
         stream.getTracks().forEach(track => track.stop());
       }
       if (durationRef.current) {

@@ -21,7 +21,7 @@ interface AuthRequest extends Request {
   };
 }
 
-export const initiateCall = async (req: AuthRequest, res: Response) => {
+export async function initiateCall(req: AuthRequest, res: Response) {
   try {
     const { patientId } = req.params;
     const caretakerId = req.user?.id;
@@ -45,22 +45,18 @@ export const initiateCall = async (req: AuthRequest, res: Response) => {
       return res.status(404).json({ error: 'Patient not found' });
     }
 
-    // Create a unique room ID for this call
-    const roomId = `${patientId}-${Date.now()}`;
-
     // Create call log entry
     const callLog = await prisma.callLog.create({
       data: {
         patientId,
         startTime: new Date(),
-        isWebRTC: true,
-        roomId
+        isWebRTC: true
       }
     });
 
     res.json({
       message: 'Call initiated',
-      roomId,
+      roomId: callLog.id,
       callLogId: callLog.id,
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
@@ -71,9 +67,9 @@ export const initiateCall = async (req: AuthRequest, res: Response) => {
     console.error('Error initiating call:', error);
     res.status(500).json({ error: 'Error initiating call' });
   }
-};
+}
 
-export const handleTranscription = async (req: Request, res: Response) => {
+export async function handleTranscription(req: Request, res: Response) {
   try {
     const { callLogId, transcription } = req.body;
 
@@ -96,7 +92,9 @@ export const handleTranscription = async (req: Request, res: Response) => {
     // Update call log with transcription
     await prisma.callLog.update({
       where: { id: callLogId },
-      data: { transcribedText: transcription }
+      data: { 
+        transcribedText: transcription
+      }
     });
 
     // Check for keywords
@@ -133,9 +131,9 @@ export const handleTranscription = async (req: Request, res: Response) => {
     console.error('Error handling transcription:', error);
     res.status(500).json({ error: 'Error processing transcription' });
   }
-};
+}
 
-export const endCall = async (req: Request, res: Response) => {
+export async function endCall(req: Request, res: Response) {
   try {
     const { callLogId } = req.params;
 
@@ -151,44 +149,4 @@ export const endCall = async (req: Request, res: Response) => {
     console.error('Error ending call:', error);
     res.status(500).json({ error: 'Error ending call' });
   }
-};
-
-// Test function to verify Twilio connectivity
-export const testTwilioConnection = async (req: Request, res: Response) => {
-  try {
-    // Use Twilio test credentials and numbers
-    const fromNumber = process.env.TWILIO_PHONE_NUMBER; // Should be +15005550006
-    const toNumber = process.env.TEST_TO_NUMBER;       // Should be +15005550009
-
-    if (!fromNumber || !toNumber) {
-      return res.status(400).json({
-        error: 'Missing test phone numbers',
-        suggestion: 'Check your .env file for TWILIO_PHONE_NUMBER and TEST_TO_NUMBER'
-      });
-    }
-
-    console.log(`Making test call from ${fromNumber} to ${toNumber}`);
-
-    // Create test call with minimal parameters
-    const call = await client.calls.create({
-      url: 'http://demo.twilio.com/docs/voice.xml', // Twilio's test TwiML
-      to: toNumber,
-      from: fromNumber
-    });
-
-    res.json({
-      message: 'Test call initiated successfully',
-      callSid: call.sid,
-      note: 'This is a test call using Twilio test credentials'
-    });
-  } catch (error: any) {
-    console.error('Twilio test failed:', error);
-    res.status(500).json({
-      error: 'Twilio test failed',
-      details: error.message,
-      code: error.code,
-      moreInfo: error.moreInfo,
-      suggestion: 'Make sure you are using valid Twilio test phone numbers (+1500555XXXX)'
-    });
-  }
-}; 
+} 

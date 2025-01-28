@@ -33,7 +33,7 @@ export const addKeyword = async (req: AuthRequest, res: Response) => {
 
     const keyword = await prisma.keyword.create({
       data: {
-        word,
+        text: word,
         patientId
       }
     });

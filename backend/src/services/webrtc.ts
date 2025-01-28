@@ -93,7 +93,7 @@ export class WebRTCService {
               }
             });
 
-            producer.on('producerclose', async () => {
+            producer.on('@close', async () => {
               await prisma.callLog.update({
                 where: { id: callLog.id },
                 data: { endTime: new Date() }

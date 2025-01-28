@@ -57,7 +57,7 @@
 ### 4. External Services
 - **Web Voice & STT Integration**:
   - Voice calls over the internet (e.g., WebRTC)  
-  - Speech-to-Text using a third-party API (e.g., Google/AWS) or self-hosted engine  
+  - Speech-to-Text using a third-party API (e.g.,opensource/whisper) or self-hosted engine  
   - Recording (if supported by the platform or via a custom server-side solution)  
   - Notifications (e.g., email, push) in place of SMS
 
