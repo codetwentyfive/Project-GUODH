@@ -32,19 +32,9 @@ model Patient {
   recordCalls  Boolean   @default(false)
   caretakerId  String
   caretaker    User      @relation(fields: [caretakerId], references: [id])
-  keywords     Keyword[]
   callLogs     CallLog[]
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
-}
-
-model Keyword {
-  id        String   @id @default(cuid())
-  text      String
-  patientId String
-  patient   Patient  @relation(fields: [patientId], references: [id])
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
 }
 
 model CallLog {
@@ -56,8 +46,6 @@ model CallLog {
   duration        Int?
   isWebRTC        Boolean   @default(true)
   roomId          String?
-  transcribedText String?
-  notificationSent Boolean  @default(false)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 }

@@ -11,6 +11,8 @@ export class SignalingService {
   private io: SocketServer;
   private users: Map<string, User> = new Map(); // userId -> User
   private socketToUser: Map<string, string> = new Map(); // socketId -> userId
+  private initialized: boolean = false;
+  private activeCallSessions: Map<string, string> = new Map(); // userId -> targetId
 
   constructor(server: Server) {
     this.io = new SocketServer(server, {
@@ -21,27 +23,35 @@ export class SignalingService {
         methods: ['GET', 'POST'],
         credentials: true
       },
-      transports: ['websocket', 'polling']
+      transports: ['websocket', 'polling'], // Allow both for better compatibility
+      pingTimeout: 20000,
+      pingInterval: 10000
     });
 
     this.setupSocketHandlers();
-    console.log('[SignalingService] Initialized');
+    this.initialized = true;
+    console.log('[SignalingService] Initialized and ready for connections');
+  }
+
+  public isInitialized(): boolean {
+    return this.initialized;
   }
 
   private setupSocketHandlers() {
     this.io.on('connection', (socket) => {
-      console.log('[SignalingService] Client connected:', socket.id);
+      console.log('[SignalingService] New connection:', socket.id);
 
-      // Handle user registration
-      socket.on('register', async (data: string | { userId: string }) => {
+      // Send immediate connection acknowledgment
+      socket.emit('connection-success', { socketId: socket.id });
+
+      socket.on('register', async (data: string | { userId: string }, callback?: (response: any) => void) => {
         try {
-          // Handle both string and object formats
           const userId = typeof data === 'string' ? data : data.userId;
           
-          // Clean up any existing registration for this user
+          // Clean up existing connection
           const existingUser = this.users.get(userId);
           if (existingUser) {
-            console.log(`[SignalingService] User ${userId} already registered, cleaning up old connection`);
+            console.log(`[SignalingService] Cleaning up existing connection for ${userId}`);
             const existingSocket = this.io.sockets.sockets.get(existingUser.socketId);
             if (existingSocket) {
               existingSocket.disconnect();
@@ -50,31 +60,36 @@ export class SignalingService {
             this.socketToUser.delete(existingUser.socketId);
           }
 
-          // Determine user type from ID prefix
           const type = userId.startsWith('caretaker') ? 'caretaker' : 'patient';
           
-          // Store user information
           this.users.set(userId, { socketId: socket.id, userId, type });
           this.socketToUser.set(socket.id, userId);
           
-          console.log(`[SignalingService] User ${userId} (${type}) registered with socket ${socket.id}`);
+          console.log(`[SignalingService] Registered ${type}:`, userId);
           
-          socket.emit('registration-success', { userId });
+          // Send success response
+          const response = { success: true, userId, type };
+          if (callback) {
+            callback(response);
+          }
+          socket.emit('registration-success', response);
         } catch (error) {
-          console.error('[SignalingService] Registration error:', error);
-          socket.emit('registration-error', { 
-            error: 'Failed to register user'
-          });
+          console.error('[SignalingService] Registration failed:', error);
+          const response = { success: false, error: 'Registration failed' };
+          if (callback) {
+            callback(response);
+          }
+          socket.emit('registration-error', response);
         }
       });
 
-      // Handle call offer
-      socket.on('call-offer', ({ targetId, offer }) => {
+      // Request to initiate call
+      socket.on('call-request', ({ targetId }) => {
         try {
-          const caller = this.socketToUser.get(socket.id);
+          const callerId = this.socketToUser.get(socket.id);
           const target = this.users.get(targetId);
           
-          if (!caller) {
+          if (!callerId) {
             throw new Error('Caller not registered');
           }
           
@@ -82,11 +97,79 @@ export class SignalingService {
             throw new Error('Target user not found or offline');
           }
 
-          console.log(`[SignalingService] Call offer from ${caller} to ${targetId}`);
+          if (this.activeCallSessions.has(callerId) || this.activeCallSessions.has(targetId)) {
+            throw new Error('One of the users is already in a call');
+          }
+
+          console.log(`[SignalingService] Call request from ${callerId} to ${targetId}`);
+          
+          // Notify target about incoming call request
+          this.io.to(target.socketId).emit('incoming-call-request', {
+            from: callerId
+          });
+
+          // Set temporary call session
+          this.activeCallSessions.set(callerId, targetId);
+          this.activeCallSessions.set(targetId, callerId);
+
+          // Auto-cancel call request after 30 seconds if not answered
+          setTimeout(() => {
+            if (this.activeCallSessions.get(callerId) === targetId) {
+              this.cancelCallRequest(callerId, targetId);
+            }
+          }, 30000);
+
+        } catch (error: any) {
+          console.error('[SignalingService] Call request error:', error);
+          socket.emit('call-failed', { 
+            error: error.message || 'Failed to initiate call request',
+            targetId 
+          });
+        }
+      });
+
+      // Handle call acceptance
+      socket.on('accept-call', ({ targetId }) => {
+        try {
+          const accepterId = this.socketToUser.get(socket.id);
+          const caller = this.users.get(targetId);
+          
+          if (!accepterId || !caller || this.activeCallSessions.get(accepterId) !== targetId) {
+            throw new Error('Invalid call acceptance');
+          }
+
+          console.log(`[SignalingService] Call accepted by ${accepterId}`);
+          
+          // Notify caller that call was accepted
+          this.io.to(caller.socketId).emit('call-accepted', {
+            from: accepterId
+          });
+
+        } catch (error: any) {
+          console.error('[SignalingService] Call acceptance error:', error);
+          socket.emit('call-failed', { 
+            error: error.message || 'Failed to accept call',
+            targetId 
+          });
+        }
+      });
+
+      // Handle call offer (only after call is accepted)
+      socket.on('call-offer', ({ targetId, offer }) => {
+        try {
+          const callerId = this.socketToUser.get(socket.id);
+          const target = this.users.get(targetId);
+          
+          if (!callerId || !target || this.activeCallSessions.get(callerId) !== targetId) {
+            throw new Error('Invalid call state for offer');
+          }
+
+          console.log(`[SignalingService] Call offer from ${callerId} to ${targetId}`);
           this.io.to(target.socketId).emit('call-offer', {
-            from: caller,
+            from: callerId,
             offer
           });
+
         } catch (error: any) {
           console.error('[SignalingService] Call offer error:', error);
           socket.emit('call-failed', { 
@@ -144,63 +227,95 @@ export class SignalingService {
         }
       });
 
-      // Handle call rejection
-      socket.on('call-reject', ({ targetId }) => {
+      // Handle media errors more gracefully
+      socket.on('media-error', ({ targetId, error }) => {
         try {
-          const sender = this.socketToUser.get(socket.id);
+          const userId = this.socketToUser.get(socket.id);
           const target = this.users.get(targetId);
           
-          if (!sender || !target) {
-            throw new Error('Invalid sender or target for call rejection');
+          if (!userId || !target) {
+            throw new Error('Invalid user or target for media error');
           }
 
-          console.log(`[SignalingService] Call rejected by ${sender}`);
-          this.io.to(target.socketId).emit('call-rejected', {
-            from: sender
-          });
+          console.log(`[SignalingService] Media error from ${userId}:`, error);
+          
+          // Notify both parties about the media error
+          const errorMessage = {
+            type: 'media',
+            message: 'Failed to access camera or microphone. Please check your permissions and device settings.'
+          };
+          
+          socket.emit('call-error', errorMessage);
+          this.io.to(target.socketId).emit('call-error', errorMessage);
+          
+          // Clean up call session
+          this.cleanupCallSession(userId, targetId);
+
         } catch (error) {
-          console.error('[SignalingService] Call rejection error:', error);
+          console.error('[SignalingService] Media error handling failed:', error);
         }
       });
 
-      // Handle call end (both event names for compatibility)
-      const handleCallEnd = ({ targetId }: { targetId: string }) => {
-        try {
-          const sender = this.socketToUser.get(socket.id);
-          const target = this.users.get(targetId);
-          
-          if (!sender || !target) {
-            throw new Error('Invalid sender or target for call end');
-          }
-
-          console.log(`[SignalingService] Call ended by ${sender}`);
-          this.io.to(target.socketId).emit('call-ended', {
-            from: sender
-          });
-        } catch (error) {
-          console.error('[SignalingService] Call end error:', error);
-        }
-      };
-
-      socket.on('end-call', handleCallEnd);
-      socket.on('call-end', handleCallEnd);
-
-      // Handle disconnection
-      socket.on('disconnect', () => {
+      // Enhanced call end handling
+      socket.on('end-call', ({ targetId }) => {
         try {
           const userId = this.socketToUser.get(socket.id);
           if (userId) {
-            console.log(`[SignalingService] User ${userId} disconnected`);
-            this.users.delete(userId);
-            this.socketToUser.delete(socket.id);
-            
-            // Notify other users about the disconnection
-            socket.broadcast.emit('user-offline', { userId });
+            this.cleanupCallSession(userId, targetId);
           }
         } catch (error) {
-          console.error('[SignalingService] Disconnect error:', error);
+          console.error('[SignalingService] Call end error:', error);
+        }
+      });
+
+      // Handle disconnection with call cleanup
+      socket.on('disconnect', () => {
+        const userId = this.socketToUser.get(socket.id);
+        if (userId) {
+          const targetId = this.activeCallSessions.get(userId);
+          if (targetId) {
+            this.cleanupCallSession(userId, targetId);
+          }
+          this.users.delete(userId);
+          this.socketToUser.delete(socket.id);
+          this.io.emit('user-disconnected', { userId });
         }
       });
     });
+  }
+
+  private cleanupCallSession(userId: string, targetId: string) {
+    console.log(`[SignalingService] Cleaning up call session between ${userId} and ${targetId}`);
+    
+    this.activeCallSessions.delete(userId);
+    this.activeCallSessions.delete(targetId);
+    
+    const target = this.users.get(targetId);
+    if (target) {
+      this.io.to(target.socketId).emit('call-ended', { from: userId });
+    }
+    
+    const user = this.users.get(userId);
+    if (user) {
+      this.io.to(user.socketId).emit('call-ended', { from: targetId });
+    }
+  }
+
+  private cancelCallRequest(callerId: string, targetId: string) {
+    console.log(`[SignalingService] Canceling call request from ${callerId} to ${targetId}`);
+    
+    this.activeCallSessions.delete(callerId);
+    this.activeCallSessions.delete(targetId);
+    
+    const caller = this.users.get(callerId);
+    const target = this.users.get(targetId);
+    
+    if (caller) {
+      this.io.to(caller.socketId).emit('call-request-timeout', { targetId });
+    }
+    
+    if (target) {
+      this.io.to(target.socketId).emit('call-request-canceled', { from: callerId });
+    }
   }
 } 
