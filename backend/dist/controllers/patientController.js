@@ -36,11 +36,7 @@ const getPatients = async (req, res) => {
         const patients = await prisma.patient.findMany({
             where: { caretakerId },
             include: {
-                keywords: true,
-                callLogs: {
-                    orderBy: { startTime: 'desc' },
-                    take: 5
-                }
+                callLogs: true
             }
         });
         res.json(patients);
@@ -64,11 +60,7 @@ const getPatient = async (req, res) => {
                 caretakerId
             },
             include: {
-                keywords: true,
-                callLogs: {
-                    orderBy: { startTime: 'desc' },
-                    take: 5
-                }
+                callLogs: true
             }
         });
         if (!patient) {

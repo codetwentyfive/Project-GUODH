@@ -45,7 +45,23 @@ model CallLog {
   endTime         DateTime?
   duration        Int?
   isWebRTC        Boolean   @default(true)
-  roomId          String?
+  status          CallStatus @default(INITIATED)
+  connectionType  String?   // "webrtc" or "audio-only"
+  failureReason   String?
+  retryCount      Int       @default(0)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
+
+  @@index([patientId])
+  @@index([status])
+}
+
+enum CallStatus {
+  INITIATED
+  CONNECTING
+  CONNECTED
+  ENDED
+  FAILED
+  REJECTED
+  TIMEOUT
 }

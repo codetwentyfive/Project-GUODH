@@ -1,21 +1,9 @@
 'use client';
 
-import React, { createContext, useContext, useState, useCallback } from 'react';
-import { socketService } from '@/services/socket';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import { socketService, type CallbackData } from '@/services/socket';
 
 type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
-
-// Import the CallbackData type from the socket service
-type CallbackData = {
-  from?: string;
-  targetId?: string;
-  offer?: RTCSessionDescriptionInit;
-  answer?: RTCSessionDescriptionInit;
-  candidate?: RTCIceCandidateInit;
-  error?: string;
-  roomId?: string;
-  userId?: string;
-};
 
 interface CallContextType {
   connect: (userId: string) => Promise<void>;
@@ -24,9 +12,7 @@ interface CallContextType {
     peerId: string;
     isIncoming: boolean;
   } | null;
-  initiateCall: (targetId: string) => void;
-  acceptCall: (callerId: string) => void;
-  rejectCall: (callerId: string) => void;
+  initiateCall: (targetId: string) => Promise<string>;
   endCall: () => void;
 }
 
@@ -36,30 +22,55 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('disconnected');
   const [currentCall, setCurrentCall] = useState<{ peerId: string; isIncoming: boolean } | null>(null);
 
+  const setupSocketListeners = useCallback(() => {
+    const handleIncomingCall = (data: CallbackData) => {
+      if (data.from) {
+        setCurrentCall({ peerId: data.from, isIncoming: true });
+      }
+    };
+
+    const handleCallEnded = () => {
+      setCurrentCall(null);
+    };
+
+    const handleCallRejected = () => {
+      setCurrentCall(null);
+    };
+
+    socketService.on('incoming-call-request', handleIncomingCall);
+    socketService.on('call-ended', handleCallEnded);
+    socketService.on('call-rejected', handleCallRejected);
+
+    return () => {
+      socketService.off('incoming-call-request', handleIncomingCall);
+      socketService.off('call-ended', handleCallEnded);
+      socketService.off('call-rejected', handleCallRejected);
+    };
+  }, []);
+
   const connect = useCallback(async (userId: string) => {
     try {
       setConnectionStatus('connecting');
       await socketService.connect();
       await socketService.register(userId);
       setConnectionStatus('connected');
+      setupSocketListeners();
     } catch (error) {
       console.error('Connection error:', error);
       setConnectionStatus('error');
       throw error;
     }
-  }, []);
+  }, [setupSocketListeners]);
 
-  const initiateCall = useCallback((targetId: string) => {
-    setCurrentCall({ peerId: targetId, isIncoming: false });
-  }, []);
-
-  const acceptCall = useCallback((callerId: string) => {
-    setCurrentCall({ peerId: callerId, isIncoming: false });
-  }, []);
-
-  const rejectCall = useCallback((callerId: string) => {
-    socketService.sendReject(callerId);
-    setCurrentCall(null);
+  const initiateCall = useCallback(async (targetId: string) => {
+    try {
+      const sessionId = await socketService.initiateCall(targetId);
+      setCurrentCall({ peerId: targetId, isIncoming: false });
+      return sessionId;
+    } catch (error) {
+      console.error('Failed to start call:', error);
+      throw error;
+    }
   }, []);
 
   const endCall = useCallback(() => {
@@ -69,33 +80,20 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     }
   }, [currentCall]);
 
-  React.useEffect(() => {
-    socketService.on('call-offer', (data: CallbackData) => {
-      if (data.from) {
-        setCurrentCall({ peerId: data.from, isIncoming: true });
-      }
-    });
-
-    socketService.on('call-ended', () => {
-      setCurrentCall(null);
-    });
-
-    socketService.on('call-rejected', () => {
-      setCurrentCall(null);
-    });
-
+  // Set up initial socket listeners
+  useEffect(() => {
+    const cleanup = setupSocketListeners();
     return () => {
+      cleanup();
       socketService.disconnect();
     };
-  }, []);
+  }, [setupSocketListeners]);
 
   const value = {
     connect,
     connectionStatus,
     currentCall,
     initiateCall,
-    acceptCall,
-    rejectCall,
     endCall,
   };
 

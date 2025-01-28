@@ -37,6 +37,7 @@ exports.WebRTCService = void 0;
 const mediasoup = __importStar(require("mediasoup"));
 const socket_io_1 = require("socket.io");
 const client_1 = require("@prisma/client");
+const client_2 = require("@prisma/client");
 const prisma = new client_1.PrismaClient();
 class WebRTCService {
     constructor(httpServer) {
@@ -109,7 +110,8 @@ class WebRTCService {
                             data: {
                                 patientId,
                                 startTime: new Date(),
-                                isWebRTC: true
+                                isWebRTC: true,
+                                status: client_2.CallStatus.INITIATED
                             }
                         });
                         producer.on('@close', async () => {

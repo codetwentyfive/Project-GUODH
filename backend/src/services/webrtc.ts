@@ -2,6 +2,7 @@ import * as mediasoup from 'mediasoup';
 import { Server } from 'socket.io';
 import { Server as HTTPServer } from 'http';
 import { PrismaClient } from '@prisma/client';
+import { CallStatus } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -89,7 +90,8 @@ export class WebRTCService {
               data: {
                 patientId,
                 startTime: new Date(),
-                isWebRTC: true
+                isWebRTC: true,
+                status: CallStatus.INITIATED
               }
             });
 

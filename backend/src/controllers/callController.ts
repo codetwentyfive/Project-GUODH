@@ -44,7 +44,6 @@ export async function initiateCall(req: AuthRequest, res: Response) {
 
     res.json({
       message: 'Call initiated',
-      roomId: callLog.id,
       callLogId: callLog.id,
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },

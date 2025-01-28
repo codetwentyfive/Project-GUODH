@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Phone, PhoneOff, Mic, MicOff, Video, VideoOff } from 'lucide-react';
 import { mockUserService } from '@/services/mockUsers';
+import { WebRTCService } from '@/services/webrtc.service';
+import { socketService, type CallbackData } from '@/services/socket';
 import toast from 'react-hot-toast';
 
 interface CallScreenProps {
@@ -25,38 +27,102 @@ export function CallScreen({ peerId, isIncoming = false, onAccept, onReject, onE
   const [callDuration, setCallDuration] = useState(0);
   const durationRef = useRef<NodeJS.Timeout | undefined>(undefined);
   const peerUser = mockUserService.getUser(peerId);
+  const webrtcRef = useRef<WebRTCService | null>(null);
 
   useEffect(() => {
-    // Start local video stream
-    navigator.mediaDevices.getUserMedia({ video: true, audio: true })
-      .then(stream => {
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = stream;
-        }
-      })
-      .catch(error => {
-        console.error('Failed to get media devices:', error);
-        toast.error('Failed to access camera or microphone');
-      });
+    const initializeCall = async () => {
+      try {
+        setCallStatus('connecting');
+        
+        // Initialize WebRTC service with the existing socket connection
+        webrtcRef.current = new WebRTCService(socketService.getSocket());
+        
+        // Initialize the call and get media stream
+        const localStream = await webrtcRef.current.initializeCall(peerId, (remoteStream) => {
+          if (remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = remoteStream;
+          }
+        });
 
-    return () => {
-      // Cleanup media streams
-      const localVideo = localVideoRef.current;
-      const remoteVideo = remoteVideoRef.current;
-      
-      if (localVideo?.srcObject) {
-        const stream = localVideo.srcObject as MediaStream;
-        stream.getTracks().forEach(track => track.stop());
-      }
-      if (remoteVideo?.srcObject) {
-        const stream = remoteVideo.srcObject as MediaStream;
-        stream.getTracks().forEach(track => track.stop());
-      }
-      if (durationRef.current) {
-        clearInterval(durationRef.current);
+        // Set local video stream
+        if (localStream && localVideoRef.current) {
+          localVideoRef.current.srcObject = localStream;
+        }
+
+        // Create and send offer if not incoming call
+        if (!isIncoming) {
+          const offer = await webrtcRef.current.createOffer();
+          if (offer) {
+            socketService.emit('call-offer', { targetId: peerId, offer });
+          }
+        }
+
+        setCallStatus('connected');
+      } catch (error) {
+        console.error('Call initialization error:', error);
+        let errorMessage = 'Failed to initialize call';
+        
+        if (error instanceof Error) {
+          if (error.name === 'NotFoundError') {
+            errorMessage = 'Camera or microphone not found. Please check your device connections.';
+          } else if (error.name === 'NotAllowedError') {
+            errorMessage = 'Please allow access to camera and microphone to make calls.';
+          }
+        }
+        
+        toast.error(errorMessage);
+        setCallStatus('ended');
+        if (onEnd) onEnd();
       }
     };
+
+    initializeCall();
+
+    // Cleanup function
+    return () => {
+      webrtcRef.current?.cleanup();
+    };
+  }, [peerId, isIncoming, onEnd]);
+
+  // Handle incoming ICE candidates
+  useEffect(() => {
+    const handleIceCandidate = async (data: CallbackData) => {
+      if (data.candidate) {
+        await webrtcRef.current?.handleIceCandidate(data.candidate);
+      }
+    };
+
+    socketService.on('ice-candidate', handleIceCandidate);
+    return () => {
+      socketService.off('ice-candidate', handleIceCandidate);
+    };
   }, []);
+
+  // Handle call negotiation
+  useEffect(() => {
+    const handleOffer = async (data: CallbackData) => {
+      if (data.offer) {
+        const answer = await webrtcRef.current?.handleOffer(data.offer);
+        if (answer) {
+          socketService.emit('call-answer', { targetId: peerId, answer });
+        }
+      }
+    };
+
+    const handleAnswer = async (data: CallbackData) => {
+      if (data.answer) {
+        await webrtcRef.current?.handleAnswer(data.answer);
+      }
+    };
+
+    socketService.on('call-offer', handleOffer);
+    socketService.on('call-answer', handleAnswer);
+
+    return () => {
+      socketService.off('call-offer', handleOffer);
+      socketService.off('call-answer', handleAnswer);
+    };
+  }, [peerId]);
 
   useEffect(() => {
     if (callStatus === 'connected') {
