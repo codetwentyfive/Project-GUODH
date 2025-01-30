@@ -57,7 +57,7 @@
 ### 4. External Services
 - **Web Voice & STT Integration**:
   - Voice calls over the internet (e.g., WebRTC)  
-  - Speech-to-Text using a third-party API (e.g., Google/AWS) or self-hosted engine  
+  - Speech-to-Text using a third-party API (e.g.,opensource/whisper) or self-hosted engine  
   - Recording (if supported by the platform or via a custom server-side solution)  
   - Notifications (e.g., email, push) in place of SMS
 
@@ -171,3 +171,48 @@
    - White-label offerings for care organizations  
    - API monetization strategy  
    - Advanced features (e.g., concurrency-based pricing)
+
+
+Always Check:
+# Socket Communication Consistency Check Request
+
+## Current Implementation
+Please review the socket event communication between:
+1. Backend (`SignalingService`)
+2. Patient Frontend (Socket Service & Context)
+3. Caretaker Frontend (Socket Service & Context)
+
+## Specific Areas to Verify
+1. **Event Names**:
+   - List all emitted events from each service
+   - Verify matching listener names in receiving services
+   - Check event name consistency across the entire flow
+
+2. **Data Structures**:
+   - Verify payload types match between emit and receive
+   - Check for required fields in event data
+   - Ensure type definitions are consistent
+
+3. **Connection Flow**:
+   - Registration process
+   - Connection state management
+   - Cleanup and disconnection handling
+
+4. **Call Flow States**:
+   - Call initiation
+   - Call acceptance/rejection
+   - Call termination
+   - Error handling
+
+## Required Information
+Please provide relevant code snippets for:
+- Backend socket event handlers
+- Frontend socket services
+- Context providers handling socket events
+- Type definitions for socket events
+
+## Expected Outcome
+- List of all socket events and their flow
+- Identification of any mismatches
+- Proposed fixes for inconsistencies
+- Documentation of the complete event flow
