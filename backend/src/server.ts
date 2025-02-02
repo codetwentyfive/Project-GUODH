@@ -33,68 +33,91 @@ const io = new Server(httpServer, {
 
 // Add user socket mapping at the top level
 const userSocketMap = new Map<string, string>();
+const activeConnections = new Set<string>();
 
 // Socket.IO connection handling
 io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
+  console.log('🔌 New client connected:', socket.id);
 
   socket.on('register', (userId: string) => {
-    console.log('User registered:', userId, 'with socket', socket.id);
+    console.log('👤 User registered:', userId, 'with socket', socket.id);
     socket.data.userId = userId;
     userSocketMap.set(userId, socket.id);
+    activeConnections.add(userId);
+    
+    // Notify others that this user is now available
+    socket.broadcast.emit('user-online', userId);
   });
 
   socket.on('call-offer', ({ targetId, offer }) => {
-    console.log('Call offer from', socket.data.userId, 'to', targetId);
+    console.log('📞 Call offer from', socket.data.userId, 'to', targetId);
     const targetSocketId = userSocketMap.get(targetId);
+    
+    if (!activeConnections.has(targetId)) {
+      console.error('❌ Target user offline:', targetId);
+      socket.emit('call-error', { message: 'User is offline' });
+      return;
+    }
+    
     if (targetSocketId) {
       socket.to(targetSocketId).emit('call-offer', {
         from: socket.data.userId,
         offer
       });
+      console.log('✅ Offer forwarded to:', targetId);
     } else {
-      console.error('Target user not found:', targetId);
-      socket.emit('call-error', { message: 'Target user not found' });
+      console.error('❌ Target socket not found:', targetId);
+      socket.emit('call-error', { message: 'Failed to reach target user' });
     }
   });
 
   socket.on('call-answer', ({ targetId, answer }) => {
-    console.log('Call answer from', socket.data.userId, 'to', targetId);
+    console.log('📞 Call answer from', socket.data.userId, 'to', targetId);
     const targetSocketId = userSocketMap.get(targetId);
     if (targetSocketId) {
       socket.to(targetSocketId).emit('call-answered', {
         from: socket.data.userId,
         answer
       });
+      console.log('✅ Answer forwarded to:', targetId);
+    } else {
+      console.error('❌ Target socket not found for answer:', targetId);
     }
   });
 
   socket.on('ice-candidate', ({ targetId, candidate }) => {
-    console.log('ICE candidate from', socket.data.userId, 'to', targetId);
+    console.log('🧊 ICE candidate from', socket.data.userId, 'to', targetId);
     const targetSocketId = userSocketMap.get(targetId);
     if (targetSocketId) {
       socket.to(targetSocketId).emit('ice-candidate', {
         from: socket.data.userId,
         candidate
       });
+      console.log('✅ ICE candidate forwarded');
+    } else {
+      console.error('❌ Target socket not found for ICE candidate:', targetId);
     }
   });
 
   socket.on('end-call', ({ targetId }) => {
-    console.log('Call ended by', socket.data.userId, 'to', targetId);
+    console.log('📞 Call ended by', socket.data.userId, 'to', targetId);
     const targetSocketId = userSocketMap.get(targetId);
     if (targetSocketId) {
       socket.to(targetSocketId).emit('call-ended', {
         from: socket.data.userId
       });
+      console.log('✅ Call end notification sent');
     }
   });
 
   socket.on('disconnect', () => {
     if (socket.data.userId) {
       userSocketMap.delete(socket.data.userId);
+      activeConnections.delete(socket.data.userId);
+      // Notify others that this user is now offline
+      socket.broadcast.emit('user-offline', socket.data.userId);
     }
-    console.log('Client disconnected:', socket.id);
+    console.log('🔌 Client disconnected:', socket.id);
   });
 });
 
@@ -126,7 +149,6 @@ app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
 // Start server
 httpServer.listen(port, () => {
   console.log(`⚡️[server]: Server is running at http://localhost:${port}`);
-  console.log(`🌍 Region: de1 (Frankfurt)`);
   console.log(`🎙️ WebRTC enabled for real-time audio communication`);
   console.log('🎙️ WebRTC signaling server enabled');
 }); 
