@@ -10,7 +10,7 @@ interface CallContextType {
   acceptCall: () => Promise<void>;
   rejectCall: () => void;
   endCall: () => void;
-  handleIncomingCall: (offer: RTCSessionDescriptionInit) => Promise<void>;
+  handleIncomingCall: (from: string, offer: RTCSessionDescriptionInit) => Promise<void>;
 }
 
 const CallContext = createContext<CallContextType | undefined>(undefined);
@@ -18,11 +18,11 @@ const CallContext = createContext<CallContextType | undefined>(undefined);
 export function CallProvider({ children }: { children: React.ReactNode }) {
   const [status, setStatus] = useState<CallStatus>('idle');
 
-  const handleIncomingCall = useCallback(async (offer: RTCSessionDescriptionInit) => {
+  const handleIncomingCall = useCallback(async (from: string, offer: RTCSessionDescriptionInit) => {
     if (!webRTCService) return;
     setStatus('incoming');
     try {
-      await webRTCService.handleIncomingCall(offer);
+      await webRTCService.handleIncomingCall(from, offer);
     } catch (error) {
       console.error('Error handling incoming call:', error);
       setStatus('idle');
@@ -32,7 +32,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const acceptCall = useCallback(async () => {
     if (!webRTCService) return;
     try {
-      await webRTCService.startCall();
+      await webRTCService.acceptCall();
       setStatus('connected');
     } catch (error) {
       console.error('Error accepting call:', error);

@@ -1,37 +1,44 @@
 import { Request, Response } from 'express';
+import jwt from 'jsonwebtoken';
 import { prisma } from '../utils/prisma';
 import { Prisma } from '@prisma/client';
 
+const JWT_SECRET = process.env.JWT_SECRET || 'your-secret-key';
+
+interface AuthRequest extends Request {
+  user?: {
+    id: string;
+  };
+}
+
 // Create a new patient
-export const createPatient = async (req: Request, res: Response) => {
+export const createPatient = async (req: AuthRequest, res: Response) => {
   try {
-    const { name, phoneNumber, caretakerId, recordCalls } = req.body;
+    const { name, phoneNumber } = req.body;
+    const caretakerId = req.user?.id;
 
-    if (!name || !phoneNumber || !caretakerId) {
-      return res.status(400).json({ error: 'Name, phone number, and caretaker ID are required' });
+    if (!caretakerId) {
+      return res.status(401).json({ error: 'Authentication required' });
     }
 
-    const caretaker = await prisma.user.findUnique({
-      where: { id: caretakerId }
-    });
-
-    if (!caretaker) {
-      return res.status(404).json({ error: 'Caretaker not found' });
-    }
-
-    const newPatient = await prisma.patient.create({
+    const patient = await prisma.patient.create({
       data: {
         name,
         phoneNumber,
-        caretakerId,
-        recordCalls: recordCalls || false
+        caretakerId
       },
       include: {
-        caretaker: true
+        caretaker: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        }
       }
     });
 
-    res.status(201).json(newPatient);
+    res.status(201).json(patient);
   } catch (error) {
     console.error('Error creating patient:', error);
     res.status(500).json({ error: 'Failed to create patient' });
@@ -39,14 +46,19 @@ export const createPatient = async (req: Request, res: Response) => {
 };
 
 // Get all patients for a caretaker
-export const getPatients = async (req: Request, res: Response) => {
+export const getPatients = async (req: AuthRequest, res: Response) => {
   try {
-    const { caretakerId } = req.params;
+    const caretakerId = req.user?.id;
+
+    if (!caretakerId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
 
     const patients = await prisma.patient.findMany({
-      where: { caretakerId },
+      where: {
+        caretakerId
+      },
       include: {
-        caretaker: true,
         callLogs: {
           orderBy: {
             startTime: 'desc'
@@ -63,15 +75,22 @@ export const getPatients = async (req: Request, res: Response) => {
   }
 };
 
-// Get a single patient by ID
-export const getPatient = async (req: Request, res: Response) => {
+// Get a single patient
+export const getPatient = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
+    const caretakerId = req.user?.id;
 
-    const patient = await prisma.patient.findUnique({
-      where: { id },
+    if (!caretakerId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const patient = await prisma.patient.findFirst({
+      where: {
+        id,
+        caretakerId
+      },
       include: {
-        caretaker: true,
         callLogs: {
           orderBy: {
             startTime: 'desc'
@@ -93,13 +112,21 @@ export const getPatient = async (req: Request, res: Response) => {
 };
 
 // Update a patient
-export const updatePatient = async (req: Request, res: Response) => {
+export const updatePatient = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
-    const { name, phoneNumber, recordCalls } = req.body;
+    const { name, phoneNumber } = req.body;
+    const caretakerId = req.user?.id;
 
-    const patient = await prisma.patient.findUnique({
-      where: { id }
+    if (!caretakerId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const patient = await prisma.patient.findFirst({
+      where: {
+        id,
+        caretakerId
+      }
     });
 
     if (!patient) {
@@ -110,33 +137,41 @@ export const updatePatient = async (req: Request, res: Response) => {
       where: { id },
       data: {
         name,
-        phoneNumber,
-        recordCalls
+        phoneNumber
       },
       include: {
-        caretaker: true
+        caretaker: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        }
       }
     });
 
     res.json(updatedPatient);
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      if (error.code === 'P2002') {
-        return res.status(400).json({ error: 'Phone number already in use' });
-      }
-    }
     console.error('Error updating patient:', error);
     res.status(500).json({ error: 'Failed to update patient' });
   }
 };
 
 // Delete a patient
-export const deletePatient = async (req: Request, res: Response) => {
+export const deletePatient = async (req: AuthRequest, res: Response) => {
   try {
     const { id } = req.params;
+    const caretakerId = req.user?.id;
 
-    const patient = await prisma.patient.findUnique({
-      where: { id }
+    if (!caretakerId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const patient = await prisma.patient.findFirst({
+      where: {
+        id,
+        caretakerId
+      }
     });
 
     if (!patient) {
@@ -147,14 +182,93 @@ export const deletePatient = async (req: Request, res: Response) => {
       where: { id }
     });
 
-    res.sendStatus(204);
+    res.json({ message: 'Patient deleted successfully' });
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError) {
-      if (error.code === 'P2003') {
-        return res.status(400).json({ error: 'Cannot delete patient with existing call logs' });
-      }
-    }
     console.error('Error deleting patient:', error);
     res.status(500).json({ error: 'Failed to delete patient' });
+  }
+};
+
+// Login patient with phone number
+export const login = async (req: Request, res: Response) => {
+  try {
+    const { phoneNumber } = req.body;
+
+    if (!phoneNumber) {
+      return res.status(400).json({ error: 'Phone number is required' });
+    }
+
+    // Find patient by phone number
+    const patient = await prisma.patient.findFirst({
+      where: { phoneNumber },
+      include: {
+        caretaker: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        }
+      }
+    });
+
+    if (!patient) {
+      return res.status(401).json({ error: 'Invalid phone number' });
+    }
+
+    // Generate JWT token
+    const token = jwt.sign({ id: patient.id }, JWT_SECRET, { expiresIn: '24h' });
+
+    res.json({
+      token,
+      patient: {
+        id: patient.id,
+        name: patient.name,
+        phoneNumber: patient.phoneNumber,
+        caretaker: patient.caretaker
+      }
+    });
+  } catch (error) {
+    console.error('Error logging in patient:', error);
+    res.status(500).json({ error: 'Failed to log in' });
+  }
+};
+
+// Get patient profile
+export const getProfile = async (req: AuthRequest, res: Response) => {
+  try {
+    const patientId = req.user?.id;
+
+    if (!patientId) {
+      return res.status(401).json({ error: 'Authentication required' });
+    }
+
+    const patient = await prisma.patient.findUnique({
+      where: { id: patientId },
+      include: {
+        caretaker: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        },
+        callLogs: {
+          orderBy: {
+            startTime: 'desc'
+          },
+          take: 5
+        }
+      }
+    });
+
+    if (!patient) {
+      return res.status(404).json({ error: 'Patient not found' });
+    }
+
+    res.json(patient);
+  } catch (error) {
+    console.error('Error getting patient profile:', error);
+    res.status(500).json({ error: 'Failed to get patient profile' });
   }
 }; 

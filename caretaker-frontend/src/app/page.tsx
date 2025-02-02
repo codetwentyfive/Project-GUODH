@@ -55,7 +55,7 @@ export default function Home() {
 
   const handleEndCall = async () => {
     if (currentPatient) {
-      await webRTCService.endCall(currentPatient.id);
+      webRTCService.endCall();
       setCallStatus('idle');
       setCurrentPatient(null);
     }
