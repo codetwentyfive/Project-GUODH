@@ -4,9 +4,7 @@ import dotenv from 'dotenv';
 import { createServer } from 'http';
 import userRoutes from './routes/userRoutes';
 import patientRoutes from './routes/patientRoutes';
-import keywordRoutes from './routes/keywordRoutes';
 import callRoutes from './routes/callRoutes';
-import webrtcRoutes from './routes/webrtcRoutes';
 import { Server } from 'socket.io';
 
 dotenv.config();
@@ -33,6 +31,9 @@ const io = new Server(httpServer, {
   transports: ['websocket', 'polling']
 });
 
+// Add user socket mapping at the top level
+const userSocketMap = new Map<string, string>();
+
 // Socket.IO connection handling
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
@@ -40,40 +41,59 @@ io.on('connection', (socket) => {
   socket.on('register', (userId: string) => {
     console.log('User registered:', userId, 'with socket', socket.id);
     socket.data.userId = userId;
+    userSocketMap.set(userId, socket.id);
   });
 
   socket.on('call-offer', ({ targetId, offer }) => {
     console.log('Call offer from', socket.data.userId, 'to', targetId);
-    socket.broadcast.emit('call-offer', {
-      from: socket.data.userId,
-      offer
-    });
+    const targetSocketId = userSocketMap.get(targetId);
+    if (targetSocketId) {
+      socket.to(targetSocketId).emit('call-offer', {
+        from: socket.data.userId,
+        offer
+      });
+    } else {
+      console.error('Target user not found:', targetId);
+      socket.emit('call-error', { message: 'Target user not found' });
+    }
   });
 
   socket.on('call-answer', ({ targetId, answer }) => {
     console.log('Call answer from', socket.data.userId, 'to', targetId);
-    socket.broadcast.emit('call-answered', {
-      from: socket.data.userId,
-      answer
-    });
+    const targetSocketId = userSocketMap.get(targetId);
+    if (targetSocketId) {
+      socket.to(targetSocketId).emit('call-answered', {
+        from: socket.data.userId,
+        answer
+      });
+    }
   });
 
   socket.on('ice-candidate', ({ targetId, candidate }) => {
     console.log('ICE candidate from', socket.data.userId, 'to', targetId);
-    socket.broadcast.emit('ice-candidate', {
-      from: socket.data.userId,
-      candidate
-    });
+    const targetSocketId = userSocketMap.get(targetId);
+    if (targetSocketId) {
+      socket.to(targetSocketId).emit('ice-candidate', {
+        from: socket.data.userId,
+        candidate
+      });
+    }
   });
 
   socket.on('end-call', ({ targetId }) => {
     console.log('Call ended by', socket.data.userId, 'to', targetId);
-    socket.broadcast.emit('call-ended', {
-      from: socket.data.userId
-    });
+    const targetSocketId = userSocketMap.get(targetId);
+    if (targetSocketId) {
+      socket.to(targetSocketId).emit('call-ended', {
+        from: socket.data.userId
+      });
+    }
   });
 
   socket.on('disconnect', () => {
+    if (socket.data.userId) {
+      userSocketMap.delete(socket.data.userId);
+    }
     console.log('Client disconnected:', socket.id);
   });
 });
@@ -90,9 +110,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 // Routes
 app.use('/api/users', userRoutes);
 app.use('/api/patients', patientRoutes);
-app.use('/api', keywordRoutes);
 app.use('/api', callRoutes);
-app.use('/api', webrtcRoutes);
 
 // Test route
 app.get('/', (req: Request, res: Response) => {

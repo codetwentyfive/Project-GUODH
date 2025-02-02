@@ -67,6 +67,12 @@ class WebRTCService {
       const state = this.peerConnection?.connectionState as ConnectionState;
       console.log('[WebRTC] Connection state changed:', state);
       this.connectionStateChangeCallbacks.forEach(callback => callback(state));
+
+      // Auto cleanup on failure
+      if (state === 'failed' || state === 'closed') {
+        console.log('[WebRTC] Connection failed or closed, cleaning up');
+        this.cleanup();
+      }
     };
 
     this.peerConnection.onicecandidate = ({ candidate }) => {
@@ -86,6 +92,12 @@ class WebRTCService {
 
     this.peerConnection.oniceconnectionstatechange = () => {
       console.log('[WebRTC] ICE connection state:', this.peerConnection?.iceConnectionState);
+      
+      // Auto cleanup on ICE failure
+      if (this.peerConnection?.iceConnectionState === 'failed') {
+        console.log('[WebRTC] ICE connection failed, cleaning up');
+        this.cleanup();
+      }
     };
   }
 
@@ -94,15 +106,22 @@ class WebRTCService {
       this.currentCallId = targetId;
       this.setupPeerConnection();
 
+      // Get user media first to ensure we have microphone access
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach(track => {
-        this.peerConnection?.addTrack(track, stream);
+        if (this.peerConnection) {
+          this.peerConnection.addTrack(track, stream);
+        }
       });
 
+      // Create and set local description (the offer)
       const offer = await this.peerConnection?.createOffer();
       if (!offer) throw new Error('Failed to create offer');
 
       await this.peerConnection?.setLocalDescription(offer);
+      console.log('[WebRTC] Local description set');
+
+      // Send offer to patient
       socketService.sendOffer(targetId, offer);
       console.log('[WebRTC] Call offer sent to:', targetId);
     } catch (error) {
@@ -117,10 +136,17 @@ class WebRTCService {
       if (!this.peerConnection) {
         throw new Error('No active call to handle answer');
       }
+
+      if (this.peerConnection.signalingState === 'stable') {
+        console.log('[WebRTC] Answer already processed');
+        return;
+      }
+
       await this.peerConnection.setRemoteDescription(answer);
       console.log('[WebRTC] Remote description set');
     } catch (error) {
       console.error('[WebRTC] Error handling answer:', error);
+      this.cleanup();
       throw error;
     }
   }
@@ -128,10 +154,17 @@ class WebRTCService {
   async handleIceCandidate(candidate: RTCIceCandidateInit): Promise<void> {
     try {
       if (!this.peerConnection) {
-        throw new Error('No active call to handle ICE candidate');
+        throw new Error('No active peer connection');
       }
+      
+      if (this.peerConnection.remoteDescription === null) {
+        console.log('[WebRTC] Queuing ICE candidate - remote description not set');
+        // Could implement ICE candidate queue here if needed
+        return;
+      }
+
       await this.peerConnection.addIceCandidate(candidate);
-      console.log('[WebRTC] ICE candidate added');
+      console.log('[WebRTC] ICE candidate added successfully');
     } catch (error) {
       console.error('[WebRTC] Error adding ICE candidate:', error);
       throw error;

@@ -46,6 +46,11 @@ class WebRTCService {
       const state = this.peerConnection?.connectionState as ConnectionState;
       console.log('[WebRTC] Connection state changed:', state);
       this.connectionStateChangeCallbacks.forEach(callback => callback(state));
+
+      if (state === 'failed' || state === 'closed') {
+        console.log('[WebRTC] Connection failed or closed, cleaning up');
+        this.cleanup();
+      }
     };
 
     this.peerConnection.onicecandidate = ({ candidate }) => {
@@ -65,6 +70,11 @@ class WebRTCService {
 
     this.peerConnection.oniceconnectionstatechange = () => {
       console.log('[WebRTC] ICE connection state:', this.peerConnection?.iceConnectionState);
+
+      if (this.peerConnection?.iceConnectionState === 'failed') {
+        console.log('[WebRTC] ICE connection failed, cleaning up');
+        this.cleanup();
+      }
     };
   }
 
@@ -73,6 +83,10 @@ class WebRTCService {
       this.currentCallId = from;
       this.pendingOffer = offer;
       console.log('[WebRTC] Received call offer from:', from);
+
+      this.setupPeerConnection();
+
+      console.log('[WebRTC] Waiting for user to accept call');
     } catch (error) {
       console.error('[WebRTC] Error handling incoming call:', error);
       this.cleanup();
@@ -86,19 +100,29 @@ class WebRTCService {
     }
 
     try {
-      this.setupPeerConnection();
+      if (!this.peerConnection) {
+        this.setupPeerConnection();
+      }
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach(track => {
-        this.peerConnection?.addTrack(track, stream);
+        if (this.peerConnection) {
+          this.peerConnection.addTrack(track, stream);
+        }
       });
 
       await this.peerConnection?.setRemoteDescription(this.pendingOffer);
-      const answer = await this.peerConnection?.createAnswer();
-      await this.peerConnection?.setLocalDescription(answer);
+      console.log('[WebRTC] Remote description set');
 
-      socketService.sendAnswer(this.currentCallId, answer!);
-      console.log('[WebRTC] Call accepted and answer sent');
+      const answer = await this.peerConnection?.createAnswer();
+      if (!answer) throw new Error('Failed to create answer');
+      
+      await this.peerConnection?.setLocalDescription(answer);
+      console.log('[WebRTC] Local description set');
+
+      socketService.sendAnswer(this.currentCallId, answer);
+      console.log('[WebRTC] Answer sent to caretaker');
+      
       this.pendingOffer = null;
     } catch (error) {
       console.error('[WebRTC] Error accepting call:', error);
@@ -116,8 +140,17 @@ class WebRTCService {
 
   async handleIceCandidate(candidate: RTCIceCandidateInit): Promise<void> {
     try {
-      await this.peerConnection?.addIceCandidate(candidate);
-      console.log('[WebRTC] ICE candidate added');
+      if (!this.peerConnection) {
+        throw new Error('No active peer connection');
+      }
+      
+      if (this.peerConnection.remoteDescription === null) {
+        console.log('[WebRTC] Queuing ICE candidate - remote description not set');
+        return;
+      }
+
+      await this.peerConnection.addIceCandidate(candidate);
+      console.log('[WebRTC] ICE candidate added successfully');
     } catch (error) {
       console.error('[WebRTC] Error adding ICE candidate:', error);
       throw error;
