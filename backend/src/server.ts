@@ -85,6 +85,17 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('call-rejected', ({ targetId }) => {
+    console.log('📞 Call rejected by', socket.data.userId);
+    const targetSocketId = userSocketMap.get(targetId);
+    if (targetSocketId) {
+      socket.to(targetSocketId).emit('call-rejected', {
+        from: socket.data.userId
+      });
+      console.log('✅ Rejection notification sent to:', targetId);
+    }
+  });
+
   socket.on('ice-candidate', ({ targetId, candidate }) => {
     console.log('🧊 ICE candidate from', socket.data.userId, 'to', targetId);
     const targetSocketId = userSocketMap.get(targetId);
