@@ -138,8 +138,8 @@ class WebRTCService {
       this.pendingOffer = null;
     } catch (error) {
       console.error('[WebRTC] Error accepting call:', error);
-      this.cleanup();
-      throw error;
+          throw error;
+
     }
   }
 
@@ -147,44 +147,13 @@ class WebRTCService {
     if (this.currentCallId) {
       console.log('[WebRTC] Rejecting call from:', this.currentCallId);
       socketService.sendReject(this.currentCallId);
-      this.cleanup();
     }
   }
 
   endCall(): void {
     console.log('[WebRTC] Ending call');
-    this.cleanup();
   }
 
-  private cleanup(): void {
-    console.log('[WebRTC] Cleaning up resources');
-    
-    // Clean up media
-    mediaManager.cleanup();
-    
-    if (this.peerConnection) {
-      // Close all transceivers
-      this.peerConnection.getTransceivers().forEach(transceiver => {
-        if (transceiver.stop) {
-          transceiver.stop();
-        }
-      });
-
-      // Close the connection
-      this.peerConnection.close();
-      this.peerConnection = null;
-    }
-
-    if (this.audioElement) {
-      this.audioElement.srcObject = null;
-    }
-
-    this.currentCallId = null;
-    this.pendingOffer = null;
-    
-    // Update user status
-    userManager.updateUserStatus('online');
-  }
 
   onConnectionStateChange(callback: ConnectionStateChangeCallback): void {
     this.connectionStateChangeCallbacks.push(callback);

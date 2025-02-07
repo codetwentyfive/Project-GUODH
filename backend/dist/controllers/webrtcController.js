@@ -21,8 +21,8 @@ const initiateWebRTCCall = async (req, res) => {
         if (!patient) {
             return res.status(404).json({ error: 'Patient not found' });
         }
-        // Create a unique room ID for this call
-        const roomId = `${patientId}-${Date.now()}`;
+/*         // Create a unique room ID for this call
+        const roomId = `${patientId}-${Date.now()}`; */
         // Create call log entry
         const callLog = await prisma.callLog.create({
             data: {
@@ -33,8 +33,9 @@ const initiateWebRTCCall = async (req, res) => {
         });
         res.json({
             message: 'WebRTC call initiated',
-            roomId,
+            //roomId,
             callLogId: callLog.id
+
         });
     }
     catch (error) {

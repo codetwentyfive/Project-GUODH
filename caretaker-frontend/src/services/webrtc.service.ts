@@ -186,6 +186,11 @@ export class WebRTCService {
   }
 
   cleanup(): void {
+    if (this.statsInterval) {
+      clearInterval(this.statsInterval);
+      this.statsInterval = null;
+    }
+
     if (this.mediaStream) {
       this.mediaStream.getTracks().forEach(track => track.stop());
       this.mediaStream = null;
@@ -194,11 +199,6 @@ export class WebRTCService {
     if (this.peerConnection) {
       this.peerConnection.close();
       this.peerConnection = null;
-    }
-
-    if (this.statsInterval) {
-      clearInterval(this.statsInterval);
-      this.statsInterval = null;
     }
   }
 } 
